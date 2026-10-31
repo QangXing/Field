@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+  <!-- 引力场：中心质点 + 四支向内箭头 -->
+  <circle cx="12" cy="12" r="2" fill="#FFFFFF" stroke="none"/>
+  <path d="M12 3V7"/>
+  <path d="M10.2 5.2L12 7L13.8 5.2"/>
+  <path d="M12 21V17"/>
+  <path d="M10.2 18.8L12 17L13.8 18.8"/>
+  <path d="M3 12H7"/>
+  <path d="M5.2 10.2L7 12L5.2 13.8"/>
+  <path d="M21 12H17"/>
+  <path d="M18.8 10.2L17 12L18.8 13.8"/>
+</svg>

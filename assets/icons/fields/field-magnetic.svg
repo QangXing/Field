@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+  <!-- 磁场：U 形磁体，两端为磁极 -->
+  <path d="M6 4V13A6 6 0 0 0 18 13V4"/>
+  <path d="M4.6 3.2H7.4V6.4H4.6Z" fill="#FFFFFF" stroke="none"/>
+  <path d="M16.6 3.2H19.4V6.4H16.6Z" fill="#FFFFFF" stroke="none"/>
+</svg>

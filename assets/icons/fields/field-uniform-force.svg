@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter">
+  <!-- 均匀力场：单支粗箭头 -->
+  <path d="M4 18L19 6"/>
+  <path d="M17.1 9.2L19 6L15.5 7.2"/>
+</svg>

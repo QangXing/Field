@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter">
+  <!-- 墙体：错缝砖墙 -->
+  <path d="M4 7H20V17H4Z"/>
+  <path d="M4 12H20"/>
+  <path d="M10 7V12"/>
+  <path d="M14 12V17"/>
+</svg>
