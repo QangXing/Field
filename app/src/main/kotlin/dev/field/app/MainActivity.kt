@@ -3,6 +3,7 @@ package dev.field.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import dev.field.app.ui.FieldLabApp
 import dev.field.app.ui.theme.FieldTheme
 
 class MainActivity : ComponentActivity() {
@@ -10,7 +11,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             FieldTheme {
-                dev.field.app.ui.SkeletonScreen()
+                FieldLabApp()
             }
         }
     }
