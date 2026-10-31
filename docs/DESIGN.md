@@ -1,24 +1,31 @@
-# Field · 2D 物理模拟器设计文档
+# Field Lab · Android 2D 场模拟沙盒 设计文档
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | v0.1（草案） |
+| 版本 | v0.2（草案） |
 | 日期 | 2026-10-31 |
 | 状态 | 待评审 |
-| 技术栈 | TypeScript 5.x + Vite + Canvas 2D |
-| 目标平台 | 现代浏览器（Chrome / Edge / Firefox / Safari，桌面优先） |
+| 平台 | Android 原生（横屏优先） |
+| 技术栈 | Kotlin 2.x + Jetpack Compose + 自研场引擎 |
+| 最低版本 | Android 8.0（API 26），targetSdk 35 |
+
+> v0.1 曾是"浏览器 2D 刚体沙盒（TypeScript + Canvas）"。本版按新的产品方向**整体重写**：平台改为 Android，核心从"刚体堆叠"改为"多种物理场 + 探针粒子"，UI 采用 Mindustry 风格，并新增页面过渡动画规范。
 
 ---
 
-## 1. 背景与定位
+## 1. 定位与核心循环
 
-**Field** 是一个运行在浏览器里的 2D 刚体物理沙盒。用户打开网页即可放置物体、拖拽交互、调整重力与材料参数，并用浏览器原生的交互方式观察物理行为。它同时是一个**可嵌入的确定性 2D 物理引擎**：核心层不依赖 DOM，可在 Node 环境跑无头测试与回放。
+**Field Lab** 是一个 Android 端的 2D 场模拟沙盒：在一个俯视世界里摆放场源（电荷、磁体、质量体、阻力区、均匀力场），发射/放置探针粒子，实时观察它们在**电场、磁场、重力场、引力场、阻力场**中的运动轨迹。
 
-一句话定位：
+Mindustry 的 UI 是"信息密度高、操作就地完成"的游戏化界面：没有独立编辑器，所有编辑都发生在当前世界里。本产品沿用这种交互哲学——**打开即进入世界，所有参数、工具、存档操作都在世界内完成**。
 
-> 打开即玩的 2D 物理沙盒，稳定的刚体模拟，场景可保存、可回放、可分享。
+核心循环：
 
-命名 `Field` 有两层含义：既是"物理场"（重力场、力场），也是"试验场"（sandbox / playground）。
+```text
+进入世界 → 选择工具 → 摆放/调整场源 → 投放探针 → 观察轨迹与场可视化
+      ↑                                              ↓
+      └────────── 调参（强度/方向/介质/可视化） ←─────┘
+```
 
 ---
 
@@ -26,680 +33,771 @@
 
 ### 2.1 目标（v0.1 必须达成）
 
-1. **稳定的 2D 刚体模拟**：圆形、凸多边形、复合形状；支持重力、摩擦、弹性、休眠。
-2. **交互式编辑**：鼠标/触控拖拽物体、创建与删除物体、平移缩放画布。
-3. **关节系统**：距离、旋转（revolute）、焊接、弹簧、鼠标关节。
-4. **时间控制**：暂停 / 单步 / 0.25×–4× 倍速 / 重置。
-5. **场景持久化**：JSON v1 格式导入导出，内置 3 个示例场景。
-6. **调试可视化**：接触点、法线、AABB、速度矢量、休眠状态着色。
-7. **确定性**：相同场景 + 相同输入序列 ⇒ 相同结果（浮点容差内），支持回放测试。
-8. **性能**：中端笔记本上 200 动态刚体 + 400 静态刚体保持 60 FPS。
+1. **五类场**：电场、磁场、重力场（均匀）、引力场（平方反比源）、阻力场（区域/全局），支持任意叠加。
+2. **场可视化**四种模式：矢量箭头、流线（磁力线/电场线）、标量热图（势能/场强）、探针轨迹。
+3. **探针粒子系统**：质量、电荷、半径、拖尾；可发射、可拖拽、可删除。
+4. **就地编辑**：工具带选源 → 点击放置 → 拖动调整 → 长按删除；撤销/重做 20 步。
+5. **Mindustry 风格 UI**：深色扁平面板、直角、黄色强调色、底部工具带、右侧参数面板。
+6. **黄色斜块划屏转场**：所有页面切换统一使用该动画，支持"减弱动画"。
+7. **存档内操作**：世界内即可保存/读取/重命名/删除/导出，无需退出到编辑器。
+8. **性能**：中端机 2000 探针 + 30 场源稳定 60 FPS；低端机自动降档 30 FPS。
 
-### 2.2 非目标（明确不做，避免范围蔓延）
+### 2.2 非目标（v0.1 明确不做）
 
-- 3D 物理、流体、软体（软体作为 v0.3 之后的实验特性，不进 v0.1）。
-- 连续碰撞检测（CCD / 高速子弹），v0.1 仅做离散检测 + 速度钳制。
-- 多人实时协作、服务端物理、云存档。
-- 移动端完整手势适配（仅保证页面可用，不做专门布局优化）。
-- 脚本化用户 API（如"用 JS 控制物体"），列入开放问题。
-
----
-
-## 3. 目标用户与场景
-
-| 用户 | 典型诉求 | 对应能力 |
-| --- | --- | --- |
-| 好奇的普通用户 | 打开网页，随便玩玩"堆箱子 / 摆多米诺" | 内置示例、零学习成本的操作、拖拽即生效 |
-| 学生 / 教师 | 直观理解重力、摩擦、动量守恒 | 参数面板、慢放、速度矢量与接触点可视化 |
-| 游戏 / 前端开发者 | 参考或复用一个小型 2D 物理引擎 | `core/` 零依赖、可 headless、API 文档、npm 可发布 |
-| 内容创作者 | 做一段物理演示并分享 | 场景 JSON 导出、URL 分享（v0.2） |
+- 3D、软体、流体（PBF 流体列入 v0.3 实验）。
+- 多边形刚体堆叠 / 关节（v0.1 只做圆形探针与静态墙体碰撞；原刚体求解器整体移出范围）。
+- 联网、云同步、多人协作。
+- iOS / 桌面端（后续用 Kotlin Multiplatform 迁移，见 §16 开放问题）。
+- 用户脚本 API。
 
 ---
 
-## 4. 技术选型
+## 3. 核心概念
 
-| 维度 | 选择 | 理由 | 备选方案 |
-| --- | --- | --- | --- |
-| 语言 | TypeScript 5.x，`strict: true` | 数值代码多，类型能显著降低接错参数的概率 | JavaScript（无类型，易出错） |
-| 构建 | Vite | 秒级冷启动、原生 ESM、静态产物极小 | Webpack（重）、Parcel |
-| 渲染 | **Canvas 2D（v0.1）** | 2D 图元绘制简单、调试友好、跨浏览器稳定 | WebGL2（留给 v0.3 的性能升级路径） |
-| UI | 原生 DOM + 轻量自研 store | 面板规模小，避免引入框架与虚拟 DOM 开销 | React / Preact |
-| 物理 | **自研**（Sequential Impulse，参考 Box2D-lite 思路） | 完全可控、可确定性、可教学、体积小 | Rapier / Matter.js / planck.js |
-| 测试 | Vitest（单元 + 无头模拟）、Playwright（e2e 冒烟） | 快、与 Vite 同生态 | Jest（配置重） |
-| 代码质量 | ESLint + Prettier + `tsc --noEmit` + CI | 保证提交门槛 | 仅靠人工 review |
-| 部署 | 静态托管（GitHub Pages / 平台一键部署） | 无后端，纯静态 | 自建服务器 |
-
-> 自研而非引入现成引擎，是本项目"可确定性、可解释、体积可控"目标的一部分；代价是稳定性调参需要迭代（见 §17 风险）。
-
----
-
-## 5. 总体架构
-
-四层单向依赖：**基础层 → 模拟层 → 表现层 → 应用层**。`core/` 与 `physics/` 绝不 import DOM 或渲染代码，保证可无头运行。
-
-```mermaid
-flowchart TB
-  subgraph L4["应用层 app/"]
-    Loop["FixedStepLoop<br/>固定步长 + 累加器"]
-    Cmd["CommandBus<br/>AddBody / RemoveBody / SetGravity"]
-    Store["SceneStore<br/>只读快照 + 订阅"]
-  end
-  subgraph L3["表现层"]
-    Render["Renderer<br/>Canvas 2D"]
-    Debug["DebugOverlay<br/>接触点 / AABB / 法线"]
-    UI["UI 面板<br/>参数 / 检查器 / 时间轴"]
-    Input["InputManager<br/>Pointer / Keyboard / 工具状态机"]
-  end
-  subgraph L2["模拟层 physics/"]
-    World["World<br/>宽相 → 窄相 → 求解 → 积分"]
-    Bodies["Body / Shape / Joint"]
-    Solver["SequentialImpulse<br/>速度迭代 + 位置修正"]
-  end
-  subgraph L1["基础层 core/"]
-    Math["Vec2 / Mat22 / AABB"]
-    Geo["SAT / 裁剪 / 凸包"]
-    Persist["JSON v1 序列化"]
-  end
-  Input --> Cmd
-  UI --> Cmd
-  Cmd --> World
-  World --> Store
-  Store --> Render
-  Store --> Debug
-  Store --> UI
-  World --> Bodies
-  Bodies --> Solver
-  Solver --> Math
-  World --> Geo
-  Persist --> World
-```
-
-**数据流原则**：输入与 UI 只能通过命令修改世界；渲染与 UI 只读取不可变快照。避免"渲染层回写物理状态"导致的隐式耦合。
-
-### 5.1 帧循环
-
-```mermaid
-sequenceDiagram
-  participant R as requestAnimationFrame
-  participant L as FixedStepLoop
-  participant W as World
-  participant S as SceneStore
-  participant V as Renderer / UI
-  R->>L: dt（秒，钳制 ≤ 0.25）
-  loop 累加器 ≥ fixedDt 且 子步数 < maxSubSteps
-    L->>W: step(fixedDt)
-    W->>W: 宽相 / 窄相 / 求解 / 积分 / 休眠
-  end
-  L->>S: 发布快照（含插值系数 alpha）
-  S->>V: 渲染（位置线性插值）
-```
-
-- `dt` 来自 `requestAnimationFrame`，切后台/卡顿导致的超大 `dt` 被钳制，避免"一次跳很多步"。
-- 首帧与单步模式下 `alpha` 取 0，避免视觉滑移。
-
----
-
-## 6. 目录结构
-
-```text
-field/
-├─ docs/
-│  └─ DESIGN.md                 # 本文档
-├─ public/                      # 静态资源（图标等）
-├─ src/
-│  ├─ core/                     # 基础层：零 DOM 依赖
-│  │  ├─ math/
-│  │  │  ├─ vec2.ts             # Vec2 运算（对象式 + 就地变体）
-│  │  │  ├─ mat22.ts            # 2×2 旋转矩阵
-│  │  │  └─ aabb.ts
-│  │  ├─ geometry/
-│  │  │  ├─ convex-hull.ts      # 顶点凸包化 + 退化剔除
-│  │  │  ├─ sat.ts              # SAT 求最大分离轴
-│  │  │  └─ clip.ts             # 参考面/入射面裁剪
-│  │  └─ utils/
-│  │     ├─ rng.ts              # 可种子化随机数
-│  │     └─ assert.ts           # 开发期断言（生产被裁剪）
-│  ├─ physics/                  # 模拟层
-│  │  ├─ shape.ts               # Circle / Polygon / Compound
-│  │  ├─ body.ts                # 刚体状态与质量属性
-│  │  ├─ broadphase.ts          # 空间哈希（v0.1）
-│  │  ├─ narrowphase.ts         # 流形生成
-│  │  ├─ manifold.ts            # 接触点缓存与 warm start 键
-│  │  ├─ solver.ts              # 顺序冲量求解器
-│  │  ├─ joints/                # 5 种关节
-│  │  ├─ island.ts              # 休眠岛划分（v0.2）
-│  │  ├─ world.ts               # 世界门面：step / query / raycast
-│  │  └─ index.ts
-│  ├─ render/
-│  │  ├─ camera.ts              # 世界↔屏幕变换
-│  │  ├─ renderer.ts
-│  │  └─ debug-overlay.ts
-│  ├─ input/
-│  │  ├─ pointer.ts
-│  │  └─ tools/                 # select / spawn / joint / erase / pan
-│  ├─ ui/
-│  │  ├─ panels/                # 世界参数 / 检查器 / 场景
-│  │  └─ store.ts
-│  ├─ persistence/
-│  │  ├─ schema.ts              # 场景 JSON v1 类型 + 校验
-│  │  └─ migrate.ts             # 版本迁移
-│  ├─ scenes/                   # 内置示例场景（JSON）
-│  ├─ app/
-│  │  ├─ main.ts
-│  │  └─ loop.ts
-│  └─ styles/
-├─ tests/
-│  ├─ unit/                     # 数学 / 碰撞 / 求解器
-│  └─ replay/                   # 确定性回放快照
-├─ index.html
-├─ package.json
-├─ tsconfig.json
-└─ vite.config.ts
-```
-
----
-
-## 7. 物理引擎设计（核心）
-
-### 7.1 坐标系、单位与约定
-
-- 世界使用**米**为单位，**Y 轴向上**（重力默认 `(0, -9.81)`）。
-- 角度使用**弧度**；渲染层负责 Y 轴翻转（`screenY = originY - worldY`）。
-- 默认渲染比例 `1 m = 40 px`，画布使用 `devicePixelRatio` 缩放。
-- 所有内部计算使用 `number`（float64）；不引入定点数（跨平台差异用容差断言处理，见 §13）。
-- 刚体同时缓存 `sin/cos`：`setAngle()` 时更新，求解器热路径不做三角函数。
-
-### 7.2 刚体数据模型
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | `BodyId` | 单调递增整数，用于稳定排序与序列化 |
-| `type` | `dynamic / static / kinematic` | 静态质量视为无穷大，kinematic 由速度驱动 |
-| `position` | `Vec2` | 质心世界坐标 |
-| `angle` | `number` | 弧度 |
-| `linearVelocity` | `Vec2` | 质心线速度 |
-| `angularVelocity` | `number` | 角速度 rad/s |
-| `mass` / `invMass` | `number` | 由形状与密度推导 |
-| `inertia` / `invInertia` | `number` | 绕质心转动惯量 |
-| `shape` | `Shape` | 圆 / 凸多边形 / 复合 |
-| `material` | `{ density, friction, restitution }` | 接触时取两体几何平均（或按规则） |
-| `fixedRotation` | `boolean` | 锁定旋转（invInertia = 0） |
-| `allowSleep` | `boolean` | 默认动态体为 true |
-| `sleepState` | `awake / sleepy / asleep` | 见 §7.8 |
-| `aabb` | `AABB` | 每步更新，供宽相使用 |
-| `userData` | `unknown` | 渲染/业务附加信息（颜色、标签） |
-
-质量属性由形状在**局部坐标**下计算：
-
-- 圆：`A = πr²`，`I = ½ m r²`
-- 凸多边形：面积用鞋带公式；质心与惯量用标准多边形积分公式，之后将顶点平移到质心坐标系。
-
-### 7.3 时间步进
-
-固定步长 + 累加器，与渲染解耦：
-
-```ts
-const MAX_FRAME_DT = 0.25; // 秒
-let accumulator = 0;
-let alpha = 0;
-
-function frame(now: number) {
-  const rawDt = Math.min((now - lastTime) / 1000, MAX_FRAME_DT);
-  lastTime = now;
-  accumulator += rawDt * timeScale;
-
-  let steps = 0;
-  while (accumulator >= fixedDt && steps < maxSubSteps) {
-    world.step(fixedDt);
-    accumulator -= fixedDt;
-    steps++;
-  }
-  // 步数打满仍落后：丢弃余额，避免"死亡螺旋"
-  if (steps === maxSubSteps) accumulator = 0;
-
-  alpha = accumulator / fixedDt;
-  renderer.render(world.snapshot(alpha));
-  requestAnimationFrame(frame);
-}
-```
-
-默认参数：`fixedDt = 1/60 s`、`maxSubSteps = 4`、`velocityIterations = 8`、`positionIterations = 3`。允许用户在参数面板调整（1/120 更稳但更贵）。
-
-### 7.4 单步管线
-
-```mermaid
-flowchart LR
-  A["1 应用外力与重力"] --> B["2 更新 AABB + 宽相"]
-  B --> C["3 窄相生成流形"]
-  C --> D["4 接触 warm start"]
-  D --> E["5 速度迭代 8 次<br/>法向 + 摩擦"]
-  E --> F["6 位置迭代 3 次<br/>穿透修正"]
-  F --> G["7 积分速度与位置"]
-  G --> H["8 休眠判定 + 事件派发"]
-```
-
-步骤 5–6 与 7 的顺序固定，保证确定性；接触求解顺序按 `(bodyA.id, bodyB.id, featureId)` 排序后遍历。
-
-### 7.5 宽相（Broad Phase）
-
-v0.1 采用**空间哈希（均匀网格）**：
-
-- 单元格边长取 `2 × 当前最大外接圆半径`（每 60 帧重算一次并重建网格，避免长条物体退化）。
-- 每个刚体按其 AABB 覆盖的所有单元格插入（静态体可懒插入并只做一次）。
-- 候选对去重：`pairKey = min(idA,idB) * 2^32 + max(idA,idB)`，用 `Set` 或排序数组去重。
-- 升级路径（v0.3）：动态 AABB 树（Box2D b2DynamicTree 思路），用于大规模静态场景；接口保持 `broadphase.pairs()` 不变，可插拔。
-
-### 7.6 窄相与接触流形
-
-| 形状对 | 算法 | 关键点 |
-| --- | --- | --- |
-| 圆–圆 | 圆心距 vs 半径和 | 1 个接触点，法线为圆心连线 |
-| 圆–多边形 | 圆心到各边最近点 | 点在多边形内时退化为"边法线最近面" |
-| 多边形–多边形 | SAT 求最大分离轴 + 参考面/入射面裁剪 | 最多 2 个接触点 |
-
-多边形 SAT 与裁剪流程：
-
-1. 对 A、B 的每条边法线求投影区间重叠，得到各轴分离量；任一轴分离量 > 0 ⇒ 无碰撞，提前返回。
-2. 取**分离量最大**的轴作为参考面（属于 A 或 B）。
-3. 在另一多边形上找与参考法线最反向的入射面。
-4. 用参考面的两个侧平面裁剪入射面，保留 `separation <= 0 + slop` 的点作为接触点（最多 2 个）。
-5. 计算每个接触点的累积冲量缓存键：`featureId = (refFaceIndex × 16) + vertexIndex`，与体 ID 组合构成稳定键，用于跨帧 warm start。
-
-退化处理：多边形创建时统一走 `convexHull()`；面积小于 `1e-6 m²` 或顶点少于 3 个则拒绝创建并给出警告。
-
-### 7.7 顺序冲量求解器（Sequential Impulse）
-
-每个接触点构建一维法向约束与二维摩擦（切向）约束。设：
-
-- 法线 `n`，切线 `t = perp(n)`
-- `rA = p - cA`，`rB = p - cB`（接触点到两体质心的杠杆臂）
-- 有效质量 `K = invMassA + invMassB + invIA·(rA×n)² + invIB·(rB×n)²`
-
-求解流程（每个速度迭代内，对每个接触点）：
-
-```text
-相对法向速度 vn = (vB + ωB×rB - vA - ωA×rA)·n
-目标：vn' ≥ 0（不分离），并吸收 Baumgarte 位置偏置与恢复系数
-
-1) 恢复系数：vn < -restitutionThreshold 时
-     bias = -e * vn，否则 bias = 0
-2) 冲量增量 λ = -(vn + bias + positionBias) / K
-3) 累积并钳制：accN = max(accN + λ, 0)，实际施加 Δ = accN - 旧accN
-4) 施加：vA -= invMassA * Δ * n；ωA -= invIA * (rA×n) * Δ（B 同理取反）
-5) 摩擦：vt = 相对速度·t；λt = -vt / Kt
-   accT 钳制在 [-μ·accN, +μ·accN]，施加同理
-```
-
-参数与稳定化策略：
-
-| 参数 | 默认值 | 作用 |
-| --- | --- | --- |
-| `velocityIterations` | 8 | 堆叠稳定性与成本的主要权衡点 |
-| `positionIterations` | 3 | 伪位置冲量修正穿透（split impulse，不污染速度） |
-| `baumgarte` | 0.2 | 位置误差反馈强度，过大导致"弹开" |
-| `slop` | 0.005 m | 允许的穿透容差，防止接触抖动 |
-| `restitutionThreshold` | 1.0 m/s | 低速接触不反弹，避免"永不静止" |
-| 最大线速度 | 40 m/s | 速度钳制，降低穿隧风险 |
-
-其他稳定性规则：
-
-- **Warm start**：每步开始时先施加上一帧累积冲量，显著减少堆叠抖动。
-- **质量比限制**：动态刚体质量与场景中位数质量比超过 100:1 时给出警告（极端质量比是抖动主因）。
-- **NaN 守卫**：每次积分后检查 `Number.isFinite`，命中则冻结该体、停止其参与求解并派发 `diagnostics` 事件（而不是让整个页面崩掉）。
-- **休眠**（§7.8）减少无效求解，同时让静止堆叠完全稳定。
-
-### 7.8 休眠
-
-- 判定：线速度 < `0.05 m/s`、角速度 < `0.05 rad/s` 持续 `0.5 s` ⇒ `sleepy → asleep`。
-- 唤醒：任一相邻体 awake、受到外力/关节驱动、被编辑（拖拽/修改属性）。
-- v0.1 用"按体计时器"实现；v0.2 升级为**接触岛（island）**整体休眠，避免"岛内部分休眠"造成的缓慢漏能。
-
-### 7.9 关节
-
-| 关节 | 约束（消除自由度） | 关键实现 |
-| --- | --- | --- |
-| `distance` | 两点距离保持 | 沿连线方向的 1D 约束，可选软约束（频率/阻尼比） |
-| `revolute` | 移除相对平移（保留旋转） | 2D 点约束 + 可选角度限位与马达 |
-| `weld` | 移除相对平移与旋转 | revolute + 角度约束 |
-| `spring` | 软距离约束 | 软约束形式（frequencyHz / dampingRatio），不硬钳制 |
-| `mouse` | 把鼠标目标当作"软锚点" | 质量归一化的软约束，`maxForce` 限制 |
-
-**拖拽必须用 mouse joint 而不是直接写位置**：直接写位置会制造无穷大速度、穿透与"爆炸"。mouse joint 用软约束 + 力上限，物理上更自然（参考 Box2D `b2MouseJoint`）。
-
-软约束参数（distance/spring 软模式）：
-
-```text
-omega = 2π·frequencyHz
-zeta  = dampingRatio
-bias  = C·(omega·dt) / (zeta + omega·dt)
-gamma = 1 / (dt·(zeta + omega·dt))
-```
-
-### 7.10 已知限制（v0.1 必须写进文档与 UI 提示）
-
-- 无 CCD：极快小物体可能穿隧（用速度钳制缓解）。
-- 凸多边形之间的凹陷/薄片堆叠仍可能抖动（迭代数上限决定）。
-- 极端质量比（>100:1）不稳定。
-- 复合形状按整体刚体处理，不做形状间自碰撞。
-
----
-
-## 8. 渲染设计
-
-### 8.1 相机
-
-```ts
-interface Camera {
-  center: Vec2;   // 世界坐标
-  zoom: number;   // 像素/米
-  viewport: { width: number; height: number }; // CSS 像素
-}
-```
-
-- 世界→屏幕：`sx = viewport.w/2 + (wx - cam.center.x) * zoom`，`sy = viewport.h/2 - (wy - cam.center.y) * zoom`。
-- 滚轮缩放以指针为锚点（缩放前后光标下的世界点不变）。
-- 平移：空格 + 拖拽，或中键拖拽；触控双指缩放列为 v0.2。
-
-### 8.2 渲染管线（Canvas 2D）
-
-每帧绘制顺序：
-
-1. 背景网格（按 zoom 自适应主/次网格线，缩放 < 0.5 时隐藏次线）
-2. 静态刚体（批量同色路径）
-3. 关节（线段 + 锚点）
-4. 动态刚体（**插值位置** = `prev * (1-alpha) + curr * alpha`；角度按最短弧插值）
-5. 选中/悬停高亮
-6. 调试层（接触点、法线、AABB、速度矢量、休眠着色）
-
-性能措施：
-
-- 形状轮廓使用 `Path2D` 缓存（按 `shapeId + 缩放档位` 复用），每帧只做 `translate/rotate + fill/stroke`。
-- 屏幕外 AABB 剔除（用世界 AABB 与视口 AABB 求交）。
-- 文字与面板全部走 DOM，不画在 Canvas 上。
-- 当 `bodyCount > 1000` 自动降级：关闭阴影、细描边、跳格绘制。
-
-### 8.3 调试可视化
-
-| 开关 | 显示 |
+| 概念 | 说明 |
 | --- | --- |
-| `debug.aabb` | 响应式 AABB（宽相候选对用不同颜色） |
-| `debug.contacts` | 接触点（黄点）+ 法线（青线）+ 冲量大小（线长） |
-| `debug.velocity` | 质心速度矢量 |
-| `debug.sleep` | awake 正常色 / sleepy 黄框 / asleep 灰化 |
-| `debug.stats` | 体数、接触数、每步耗时（物理/渲染分列） |
+| **世界（World）** | 一个矩形边界内的模拟空间，含边界行为、固定步长、相机 |
+| **场源（FieldSource）** | 产生场的对象：点电荷、磁体、质量体、阻力区、均匀力场 |
+| **场（Field）** | 由若干场源叠加得到的空间向量/标量函数，统一接口 `FieldModel.sample()` |
+| **探针（Probe）** | 受场作用的小球粒子，拥有质量、电荷、半径、拖尾历史 |
+| **场视图（FieldView）** | 场的可视化表现；与物理模拟解耦，可独立开关与调参 |
+| **存档（Session）** | 世界 + 场源 + 探针 + 相机 + 可视化设置的完整快照（JSON v2） |
 
 ---
 
-## 9. 交互与工具
+## 4. 场系统设计（核心）
 
-工具状态机：`select`（默认） / `spawn`（圆形/矩形/多边形） / `joint`（距离/旋转/弹簧） / `erase` / `pan`。
+### 4.1 统一接口
+
+所有场源实现同一套采样接口，物理与可视化共用，避免"物理算一套、画图算另一套"。
+
+```kotlin
+// :core 纯 Kotlin，无 Android 依赖
+data class FieldSample(
+    val electric: Vec2 = Vec2.ZERO,      // E，供带电粒子受力
+    val magneticBz: Double = 0.0,        // B 的 z 分量（垂直屏幕向外）
+    val gravity: Vec2 = Vec2.ZERO,       // g（均匀重力 + 引力叠加）
+    val dragLinear: Double = 0.0,        // 线性阻力系数 c1
+    val dragQuadratic: Double = 0.0,     // 二次阻力系数 c2
+    val wind: Vec2 = Vec2.ZERO,          // 介质流速（阻力相对速度用）
+    val potential: Double = 0.0          // 标量势（热图/等势线用）
+)
+
+interface FieldSource {
+    val id: Long
+    fun accumulate(p: Vec2, t: Double, out: FieldSample)  // 就地累加，热路径零分配
+}
+```
+
+**采样是就地累加**：`World.sample(p)` 复用模块级 `FieldSample` 实例，避免每个粒子每步分配对象。
+
+### 4.2 五类场
+
+| 场 | 源类型 | 数学定义（软化后） | 对探针的作用 | 可视化 |
+| --- | --- | --- | --- | --- |
+| 电场 | 点电荷 `q` | `E = k Σ q_i (p - p_i) / (d² + ε²)^{3/2}` | `a += q_probe·E / m` | 场线（正→负）、箭头、势热图 |
+| 磁场 | 磁体（两个磁极） | `Bz = k_m Σ ±m_i / (d² + ε²)`，磁极 N/S 各一 | `a += q·Bz·(vy, -vx) / m`（洛伦兹力，2D） | 磁力线（N→S）、箭头 |
+| 重力场 | 均匀场 | `g = (gx, gy)` | `a += g` | 箭头（统一色） |
+| 引力场 | 质量体 `M` | `g += G M_i (p - p_i) / (d² + ε²)^{3/2}` | `a += g` | 箭头、势热图 |
+| 阻力场 | 区域 + 全局 | `F = -(c1·v_rel + c2·|v_rel|·v_rel)`，`v_rel = v - wind` | `a += F / m` | 区域斜纹填充 + 风向箭头 |
+
+补充的两种（低成本、强表现力，建议 v0.1 一并实现）：
+
+| 场 | 说明 |
+| --- | --- |
+| **均匀力场** | 任意方向的常加速度，用于"风/斜面/传送带"式实验 |
+| **边界墙** | 静态矩形/线段，参与碰撞，不产生场 |
+
+> 磁场的 2D 建模说明：真实 3D 磁偶极在屏幕平面内无法严格降维，这里用"两个磁极（磁荷）"近似，`Bz` 为垂直屏幕分量，磁力线在平面内表现为 N→S 的曲线。这是可视化友好的近似，不是严格电磁学；文档与 UI 中明确标注"演示模型"。
+
+### 4.3 单位与常量
+
+为让滑杆数值友好，采用**无量纲"模拟单位"**，不直接使用 SI：
+
+| 常量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `kE`（电场常数） | `1.0` | 等价于 `1/(4πε₀)` 的缩放版 |
+| `kM`（磁场常数） | `1.0` | 磁极强度 → Bz 的比例 |
+| `G`（引力常数） | `1.0` | 质量 → 加速度的比例 |
+| 软化 `ε` | `0.05 m` | 防止 `1/r²` 奇点；`ε²` 加在分母内 |
+| 世界尺度 | 40 m × 24 m | 横向视野，配合 24 px/m 默认缩放 |
+
+所有常量可在"高级参数"面板调整；默认值保证"一个单位电荷在 1 m 外产生约 1 的加速度"的可感知量级。
+
+### 4.4 叠加顺序与采样
+
+```text
+sample(p) = Σ_sources.accumulate(p, t)
+```
+
+- 电场、引力场、重力场、阻力场、风场都直接线性叠加。
+- 阻力系数与风速按区域**累加后钳制**（`c1 + c2 ≤ cMax`），避免重叠区域出现"无限黏滞"。
+- 场源数量上限：200（v0.1），超过拒绝并提示。
+- 采样复杂度 `O(源数)`；2000 探针 × 20 源 × 2 子步 = 8 万次采样/帧，Kotlin 上完全可控。
+- 优化：为每个源缓存影响半径（如阻力区、带截断的引力源），超出半径直接跳过。
+
+### 4.5 场线 / 流线追踪
+
+- 使用 **RK4** 积分：`p_{n+1} = p_n + h·(k1 + 2k2 + 2k3 + k4)/6`，步长 `h = 0.15 m`，最多 240 步。
+- 种子策略：
+  - 电场线：每个正电荷周围均匀撒 12 个种子，沿 `+E` 方向追踪，遇负电荷或出界停止。
+  - 磁力线：从每个磁体的 N 极撒 10 个种子，沿 `Bz` 方向追踪到 S 极。
+  - 阻力/风场：均匀网格种子，沿速度场追踪。
+- 结果缓存为 `List<Polyline>`，**仅在源变化或参数变化时重算**（脏标记），不逐帧计算。
+- 视觉：细线 + 沿线渐变透明度 + 方向小箭头；单帧绘制上限 6000 段。
+
+### 4.6 数值稳定性
+
+| 风险 | 处理 |
+| --- | --- |
+| `1/r²` 奇点 | 软化 ε；超过 `d < 0.02 m` 时按最小距离计算（力上限） |
+| 高速粒子穿出边界 | 速度钳制 60 m/s；边界碰撞用连续检测（圆 vs 边） |
+| 刚性阻尼导致爆炸 | 阻力系数钳制；半隐式积分对线性阻尼无条件稳定 |
+| NaN | 每步 `isFinite` 检查；命中即冻结该探针并标记 `faulted`（红色描边），不影响其他粒子 |
+| 长时间能量漂移 | 提供 RK4 积分器选项（4× 成本）；半隐式为默认 |
+
+---
+
+## 5. 实体与动力学
+
+### 5.1 探针粒子
+
+| 属性 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `position` | Vec2 | — | 世界坐标（米） |
+| `velocity` | Vec2 | `(0,0)` | 米/秒 |
+| `mass` | Double | 1.0 | 参与 `a = F/m` |
+| `charge` | Double | 1.0 | 电场与磁场的耦合强度，可为负 |
+| `radius` | Double | 0.12 | 碰撞与绘制半径 |
+| `dragScale` | Double | 1.0 | 个体阻力倍率（与介质系数相乘） |
+| `trail` | 环形缓冲 32 点 | 开 | 轨迹拖尾 |
+| `faulted` | Boolean | false | NaN 守卫标记 |
+
+### 5.2 边界与碰撞
+
+- 边界模式：`reflect`（默认）/ `wrap`（环绕）/ `open`（飞离后移除）。
+- 探针-探针碰撞：可选开关（默认**开**），圆-圆弹性碰撞，按质量加权冲量，恢复系数 0.2。
+- 探针-墙碰撞：圆 vs 轴对齐矩形/线段最近点，位置投影 + 法向速度反射。
+- 宽相：探针数 > 200 时启用空间哈希（单元格 2× 最大半径）；小于 200 直接两两检测。
+- 高速穿隧：单步位移超过半径时，对该粒子做 2–8 次子步细分（仅碰撞判定，场力仍按整步积分）。
+
+### 5.3 积分器与时间步
+
+| 项 | 默认 | 可选 |
+| --- | --- | --- |
+| 固定步长 | `1/60 s` | 1/120 – 1/30 |
+| 子步 | 2 | 1 – 4 |
+| 积分器 | 半隐式 Euler | RK4（精度优先） |
+| 倍速 | 1× | 0.25× / 0.5× / 1× / 2× / 4× |
+| 暂停/单步 | 支持 | — |
+
+固定步长 + 累加器与渲染解耦；`dt` 钳制 0.25 s，最多 4 子步，超限丢弃余额（避免"死亡螺旋"）。
+
+### 5.4 世界内操作
 
 | 操作 | 行为 |
 | --- | --- |
-| 左键拖拽物体 | 创建 mouse joint，松开销毁 |
-| 左键点空白 | 取消选中 |
-| 网格拖拽（多选） | 框选（v0.2） |
-| 右键 / `E` | 删除悬停物体 |
-| 滚轮 | 以指针为锚点缩放 |
-| 空格 + 拖拽 / 中键 | 平移 |
-| `Space` | 暂停 / 继续 |
-| `S` | 单步 |
-| `R` | 重置场景 |
-| `D` | 切换调试层 |
-| `Ctrl+Z / Ctrl+Shift+Z` | 撤销 / 重做（命令栈，v0.2） |
+| 点击工具带槽位 | 选中"待放置源"类型（电荷 +/−、磁体、质量体、阻力区、均匀力场、墙、橡皮） |
+| 点击空白 | 按当前工具放置源 / 选中探针 |
+| 拖动源 | 移动源（实时重算场） |
+| 拖动空白 | 平移世界 |
+| 双指捏合 | 缩放（0.5×–4×） |
+| 长按源 | 弹出删除确认（Mindustry 风格小面板） |
+| 双指长按 | 快速投放探针（可选） |
+| 顶部"+" | 打开探针发射面板（数量、初速度、电荷、散布角） |
 
-命中测试顺序：`world.queryPoint(p)` 取最上层（最后创建且 `pickable`）的动态体；静态体可拖但默认锁定（`locked` 标记）。
+撤销栈：命令模式记录"增删改"操作，容量 20，UI 提供撤销/重做按钮（放在顶栏，不占手势）。
 
 ---
 
-## 10. UI 面板
+## 6. 渲染与可视化
 
-- **顶栏**：播放/暂停、单步、倍速（0.25×/0.5×/1×/2×/4×）、重置、导入、导出、示例场景下拉。
-- **世界参数**：重力 `gx/gy`（滑杆 + 数值）、固定步长、迭代次数、休眠开关、调试开关。
-- **检查器**：选中体的类型、位置、角度、速度、质量、密度、摩擦、弹性、颜色；只读区展示接触数。
-- **场景面板**：场景名、物体计数、保存到本地（localStorage 最近 5 个）。
-- **状态栏**：FPS、体数、接触对数、物理/渲染耗时。
+### 6.1 渲染技术选择
 
-UI 不直接持有 `World` 引用，只通过 `CommandBus` 下发命令，并通过 `SceneStore` 订阅快照刷新。
+**v0.1 使用 Compose Canvas**（单线程、`withFrameNanos` 驱动），理由：
+
+- 与 HUD 共用一套 Compose 状态，开发与调试成本最低。
+- 2000 个探针用 `drawPoints` 批量绘制可稳定 60 FPS；场热图用预计算 `ImageBitmap` 上屏，避免逐像素采样。
+- 预留降级路径：若低端机实测掉帧，将 `FieldCanvas` 替换为 `SurfaceView + 独立绘制线程`，对上层接口不变（详见 §12）。
+
+渲染层序（自下而上）：
+
+```text
+1 背景网格（自适应稀疏，缩放 < 0.4 隐藏次级网格）
+2 场热图（可选，ImageBitmap，最近邻缩放）
+3 场线 / 流线（可选）
+4 矢量箭头网格（可选，默认开）
+5 阻力区 / 磁场区域底纹
+6 墙体与边界
+7 场源图标（+ / − / N/S / 质量符号）
+8 探针拖尾 + 探针本体
+9 选中高亮、放置预览（半透明）
+10 调试层（受力矢量、速度、FPS/计数）
+```
+
+### 6.2 四种可视化模式
+
+| 模式 | 实现 | 刷新策略 | 默认 |
+| --- | --- | --- | --- |
+| **矢量箭头** | 24×14 网格采样，箭头长度按 `log1p(|F|)` 归一化，头部小三角 | 源变化时重算（脏标记） | 开 |
+| **流线 / 场线** | RK4 追踪，见 §4.5 | 源变化时重算 | 开（仅电场/磁场） |
+| **标量热图** | 96×54 网格采样 → ARGB 色带 → `ImageBitmap` | 源变化或每 500ms | 关 |
+| **探针轨迹** | 每粒子环形缓冲 32 点，渐隐折线 | 逐帧 | 开 |
+
+配色与场的语义绑定（同时满足色弱可辨，用形状辅助区分）：
+
+| 场 | 主色 | 辅助 |
+| --- | --- | --- |
+| 电场 | `#4FD1FF` 青 | 箭头 + 场线 |
+| 磁场 | `#FF7BD5` 品红 | 虚线磁力线 |
+| 重力 / 引力 | `#FFD37F` 黄 | 实心箭头 |
+| 阻力 | `#7EE787` 绿 | 45° 斜纹填充 |
+| 均匀力场 | `#C792EA` 紫 | 大箭头 |
+
+### 6.3 相机与坐标
+
+- 世界坐标：米，Y 轴向上；屏幕坐标 Y 轴向下，渲染时翻转。
+- 相机：`center: Vec2`、`zoom: Float`（px/m，默认 24）。
+- 手势变换采用"指针锚点缩放"：缩放前后手指下的世界点保持不动。
+- 屏幕外剔除：按世界 AABB 与视口求交，跳过绘制。
+
+### 6.4 性能预算
+
+| 指标 | 中端机（60 FPS） | 低端机（30 FPS） |
+| --- | --- | --- |
+| 探针 | 2000 | 800 |
+| 场源 | 30 | 30 |
+| 物理耗时 | ≤ 6 ms/帧 | ≤ 12 ms/帧 |
+| 渲染耗时 | ≤ 6 ms/帧 | ≤ 14 ms/帧 |
+| 热图网格 | 96×54 | 64×36 |
+| 拖尾点数 | 32 | 12 |
+| 场线总段数 | 6000 | 2500 |
+
+降档策略：连续 30 帧超预算 → 自动降一档，并在状态栏提示（可关闭自动降档）。
 
 ---
 
-## 11. 场景格式（JSON v1）
+## 7. UI 设计（Mindustry 风格）
+
+### 7.1 视觉规范
+
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| `bg` | `#171A1E` | 世界底色 |
+| `surface` | `#262B31` | 面板背景 |
+| `surfaceRaised` | `#313840` | 按钮 / 槽位 |
+| `border` | `#48515B` | 1–2dp 描边 |
+| `accent` | `#FFD37F` | 主强调色（黄色） |
+| `accentDark` | `#D9A94B` | 按下态 / 斜块阴影 |
+| `textPrimary` | `#E8EDF2` | 主文字 |
+| `textSecondary` | `#98A3AE` | 次要文字 |
+| `danger` | `#FF6B5E` | 删除 / 错误 |
+| `grid` | `#2B3036` | 网格线 |
+
+- **圆角 0dp**，全部直角；面板用 1dp 描边 + 顶部 2dp 强调色条（Mindustry 的标志性做法）。
+- 标签用**全大写 + 字距 1.2sp**；数值用等宽数字（`FontFeatureSettings("tnum")`）。
+- 字体：系统 sans；可选打包 `Oxanium`（SIL OFL）作为标题字体。
+- 图标线条 2dp，24dp 画布，选中态用黄色描边 + 内发光（`0x33FFD37F`）。
+- 面板进入/收起：从右侧滑入 180ms + 透明度渐显；不做弹性回弹。
+
+### 7.2 布局（横屏）
+
+```text
+┌───────────────────────────────────────────────────────────────┐
+│ HUD: FIELD LAB · 世界名 · t=12.4s · 探针 240 · 60FPS   [↶][↷][⏸][💾] │
+├──────────────────────────────────────────┬────────────────────┤
+│                                          │  右侧面板（可收起）   │
+│                                          │  ├ 场参数            │
+│              世界 Canvas                  │  ├ 可视化            │
+│                                          │  ├ 探针发射          │
+│                                          │  └ 检查器            │
+│                                          │                     │
+├──────────────────────────┬───────────────┴────────────────────┤
+│ 工具带 8 槽（2×4）        │ ▶ ⏸ ⏭  ×1   [重置]   [存档]  [帮助]  │
+└──────────────────────────┴────────────────────────────────────┘
+```
+
+- 顶栏高 52dp；底部栏高 72dp；右侧面板宽 300dp（平板 340dp）。
+- 竖屏：世界占上半 55%，面板变为底部抽屉（高度 45%，可拖动），工具带改为横向滚动单行。
+- 小屏（< 600dp 宽）：右侧面板默认收起，用图标按钮唤出。
+
+### 7.3 组件清单
+
+| 组件 | 内容 | 行为 |
+| --- | --- | --- |
+| **顶栏 HUD** | 标题、世界名、模拟时间、探针数、FPS、撤销/重做、暂停、存档 | 点击世界名可重命名 |
+| **工具带** | 8 个槽位：正电荷、负电荷、磁体、质量体、阻力区、均匀力场、墙、橡皮 | 点击选中；选中槽位黄色描边 + 图标放大 1.15× |
+| **时间控制条** | 播放/暂停、单步、倍速循环、重置 | 长按倍速显示 5 档选择 |
+| **右侧参数面板** | 分节手风琴：场参数（各场开关/强度）、可视化（模式/透明度）、探针发射、检查器 | 收起时只留 48dp 竖直标签条 |
+| **检查器** | 选中源/探针的属性滑杆与数值输入 | 修改立即生效；滑杆带"长按复位" |
+| **存档面板** | 槽位卡片列表（名称、时间、探针数、缩略色块） | 保存/读取/重命名/删除/复制/导出；长按卡片弹出操作菜单 |
+| **Toast / 提示** | 顶部滑入的短提示（Mindustry 风格小方条） | 2.5s 自动消失；错误用红色描边 |
+| **空状态** | 无场源时提示"从底部工具带选择一个场源" | 首次进入显示 3 步引导遮罩 |
+
+### 7.4 手势与工具状态机
+
+工具状态：`SELECT`（默认）/ `PLACE`（已选源类型）/ `ERASE` / `PAN`。
+
+- 点击判定：按下与抬起位移 < 8dp 且时长 < 300ms。
+- 拖动：位移 ≥ 8dp 即进入拖拽（移动源或平移世界，按起点命中对象决定）。
+- 双指：捏合缩放 + 双指平移；期间屏蔽单指编辑。
+- `PLACE` 模式拖动空白 = 平移，避免误放；点击空白才放置。
+- 放置预览：跟随手指的半透明源图标 + 有效/无效（与已有源过近时红色）。
+- 触控目标 ≥ 48dp；工具槽 56dp。
+
+### 7.5 "存档内操作"的具体落地
+
+- 应用启动直接进入**上次世界**（自动存档），不经过菜单；主菜单从顶栏溢出菜单进入。
+- 所有保存/读取都是**覆盖层**（世界不卸载、模拟不重置，读取时才替换状态）。
+- 保存时若已有同名槽位：询问"覆盖 / 另存为"。
+- 自动保存：每 15s 且世界有变更时写 `autosave.field.json`；切后台立即保存。
+- 读档前若当前世界有未保存变更：提示"保存并读取 / 直接读取 / 取消"。
+
+### 7.6 无障碍与本地化
+
+- 所有图标按钮有 `contentDescription`；TalkBack 可读。
+- 触控目标 ≥ 48dp；对比度 ≥ 4.5:1（强调黄在深底上对比度足够，仅用于描边/图标，不用作小号正文）。
+- 跟随系统"动画时长缩放"：为 0 时转场改为 120ms 淡入淡出。
+- 中文 / 英文两套 `strings.xml`；数值与单位本地化（`m/s`、`G` 等不翻译）。
+
+---
+
+## 8. 导航与过渡动画
+
+### 8.1 页面与导航图
+
+为完全控制转场，导航不使用 Navigation-Compose，而是自研轻量栈（`sealed class Screen` + `ArrayDeque` + 状态），这样才能让"黄色斜块覆盖层"统一接管所有切换。
+
+```mermaid
+stateDiagram-v2
+  [*] --> Sandbox
+  Sandbox --> Menu: 顶栏溢出菜单
+  Menu --> Sandbox: 继续 / 新建
+  Menu --> Saves: 存档
+  Menu --> Settings
+  Menu --> Help
+  Saves --> Sandbox: 载入
+  Settings --> Menu
+  Help --> Menu
+  Sandbox --> Saves: HUD 存档按钮（覆盖层）
+```
+
+- 首次启动：显示 3 步引导（世界内遮罩，不走页面切换）。
+- 之后启动：直接恢复到上次世界（Sandbox）。
+- 覆盖层类界面（存档、设置、帮助）也可以"页"形式出现，统一走同一套转场。
+
+### 8.2 黄色斜块划屏转场（核心规范）
+
+**视觉**：6 块平行四边形黄色斜块从屏幕左侧依次扫入，铺满全屏，内容在中点切换，随后斜块继续向右扫出，露出新页面。斜块之间保留 2dp 深黄缝隙，形成"斜纹块"感。
+
+**参数**：
+
+| 参数 | 值 | 说明 |
+| --- | --- | --- |
+| 总时长 | 520 ms | 过快看不清块感，过慢显拖沓 |
+| 块数 | 6 | 手机上每块约 1/6 屏宽 |
+| 单块宽度 | `W/6 × 1.5 + skew` | 1.5 倍重叠，确保扫过期间无缝隙穿透 |
+| 斜切量 | `skew = H × 0.35` | 约 19° 斜角 |
+| 块间距 | 2 dp | 深黄色缝隙 |
+| 块启动错峰 | 45 ms | 形成"依次划过" |
+| 内容切换时刻 | 260 ms（50%） | 全屏被覆盖最稳的时刻 |
+| 颜色 | `#FFD37F` / `#F2B94F` / `#E6A63C` 交替 | 加 2dp `#8A6420` 前沿描边 |
+| 缓动 | `FastOutSlowInEasing` | 整体线性推进 + 单块缓动 |
+| 输入 | 全程拦截 | 覆盖层全屏 `pointerInput` 吞掉事件 |
+| 减弱动画 | 120 ms 交叉淡入淡出 | 系统动画缩放为 0 时 |
+
+**时序**：
+
+```text
+0ms ─────────── 260ms ─────────── 520ms
+│ 斜块扫入(错峰) │   斜块扫出      │
+│                ↑ 内容已切换      │
+```
+
+**实现要点**：
+
+- 覆盖层放在根 `Box` 的 `zIndex(20f)`，高于 HUD 与面板。
+- 单块进度 = `clamp((t*D - i*stagger) / blockDuration)`，块本身 `FastOutSlowInEasing`；整体 `p` 为 0..1 线性。
+- 斜块路径在尺寸变化时**预计算为 `Path`**，绘制时仅 `translate`，不在每帧 `Path` 中分配。
+- 内容切换由 `onMidpoint` 回调触发导航；`AnimatedContent` 本身用 0ms 切换（避免与斜块动画叠加出"双重动画"）。
+- 覆盖层自身 `alpha` 在 0 和 1 两端保持不透明，避免首尾闪白。
+
+```kotlin
+@Composable
+fun YellowBlockWipe(
+    visible: Boolean,
+    onMidpoint: () -> Unit,
+    onFinished: () -> Unit,
+) {
+    val p = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(visible) {
+        if (!visible) return@LaunchedEffect
+        p.snapTo(0f)
+        p.animateTo(1f, tween(520, easing = LinearEasing))
+        onFinished()
+    }
+    Canvas(Modifier.fillMaxSize().zIndex(20f)) {
+        val t = p.value
+        if (t <= 0f || t >= 1f) return@Canvas
+        if (t >= 0.5f) onMidpoint()   // 仅触发一次，需用旗标去重
+        val skew = size.height * 0.35f
+        val blockW = size.width / 6f * 1.5f + skew
+        repeat(6) { i ->
+            val local = ((t * 520f - i * 45f) / 520f).coerceIn(0f, 1f)
+            val eased = FastOutSlowInEasing.transform(local)
+            val x = -blockW + eased * (size.width + blockW * 2f)
+            val path = Path().apply {
+                moveTo(x + skew, 0f)
+                lineTo(x + blockW + skew, 0f)
+                lineTo(x + blockW, size.height)
+                lineTo(x, size.height)
+                close()
+            }
+            drawPath(path, color = blockColor(i))
+        }
+    }
+}
+```
+
+> 代码为规范示意，正式实现需把 `Path` 缓存到 `drawWithCache`、把中点回调移到 `LaunchedEffect` 的 `snapshotFlow`，并处理"内容在 mid 之后不可见"的 20ms 容错。
+
+### 8.3 其他微动效
+
+| 场景 | 动画 |
+| --- | --- |
+| 工具槽选中 | 描边高亮 90ms + 图标 scale 1→1.15 |
+| 右侧面板展开/收起 | 宽度/透明度 180ms，`FastOutSlowInEasing` |
+| 按钮按下 | 背景色下沉 + scale 0.97，80ms |
+| Toast | 顶部滑入 200ms，停留 2.5s，淡出 150ms |
+| 存档卡片列表 | 40ms 错峰淡入（仅首次进入） |
+| 放置预览 | 跟随指针，无动画（保证即时感） |
+
+---
+
+## 9. 存档与数据
+
+### 9.1 场景 JSON v2
 
 ```json
 {
-  "version": 1,
-  "name": "Box Stack",
-  "gravity": [0, -9.81],
+  "version": 2,
+  "name": "Dipole",
+  "world": { "bounds": [-20, -12, 20, 12], "boundary": "reflect" },
   "settings": {
-    "fixedDt": 0.016666666666666666,
-    "velocityIterations": 8,
-    "positionIterations": 3,
-    "allowSleep": true
+    "fixedDt": 0.0166666667,
+    "subSteps": 2,
+    "integrator": "semiImplicit",
+    "speed": 1.0,
+    "collisions": true
   },
-  "camera": { "center": [0, 5], "zoom": 40 },
-  "bodies": [
-    {
-      "id": 1,
-      "type": "static",
-      "position": [0, 0],
-      "angle": 0,
-      "shape": { "type": "polygon", "vertices": [[-10, -0.5], [10, -0.5], [10, 0.5], [-10, 0.5]] },
-      "material": { "density": 1, "friction": 0.6, "restitution": 0 },
-      "userData": { "color": "#334155" }
-    },
-    {
-      "id": 2,
-      "type": "dynamic",
-      "position": [0, 3],
-      "angle": 0.1,
-      "shape": { "type": "circle", "radius": 0.5 },
-      "material": { "density": 1, "friction": 0.5, "restitution": 0.2 },
-      "userData": { "color": "#38bdf8" }
-    }
+  "sources": [
+    { "id": 1, "type": "charge", "position": [-3, 0], "charge": 2.0 },
+    { "id": 2, "type": "charge", "position": [3, 0], "charge": -2.0 },
+    { "id": 3, "type": "magnet", "position": [0, 4], "strength": 1.0, "angle": 0 },
+    { "id": 4, "type": "mass", "position": [0, -5], "mass": 8.0 },
+    { "id": 5, "type": "dragRegion", "shape": { "type": "rect", "center": [8, 0], "size": [6, 12] },
+      "linear": 0.6, "quadratic": 0.1, "wind": [0.8, 0] },
+    { "id": 6, "type": "uniformForce", "accel": [0, -3] },
+    { "id": 7, "type": "wall", "shape": { "type": "rect", "center": [0, -8], "size": [40, 1] } }
   ],
-  "joints": [
-    { "type": "distance", "a": 2, "b": 3, "anchorA": [0, 0], "anchorB": [0, 0], "length": 2.0 }
-  ]
+  "probes": [
+    { "id": 1, "position": [0, 2], "velocity": [1, 0], "mass": 1, "charge": 1, "radius": 0.12 }
+  ],
+  "camera": { "center": [0, 0], "zoom": 24 },
+  "visuals": { "arrows": true, "streamlines": true, "heatmap": false, "trails": true }
 }
 ```
 
-约束与校验规则：
+校验规则：
 
-- 解析后必须通过 `validateScene()`；失败给出**字段级**错误（`bodies[2].shape.vertices: 顶点不足 3 个`），不静默吞掉。
-- `id` 必须唯一且为正整数；缺失时按顺序补号，但会提示"已自动补号"。
-- 未知字段保留在 `extras` 中，保证向前兼容（v1 读取 v2 文件时不丢数据）。
-- `migrate.ts` 按 `version` 逐级升级；写入永远输出当前版本。
-- 导出时对数值保留 6 位小数，减少文件体积与 diff 噪声。
+- 解析后必须通过 `SceneValidator`；错误**字段级**返回（如 `sources[4].shape.size: 必须为正数`），不做静默兜底。
+- `id` 唯一；缺失时自动补号并提示。
+- 未知字段保留在 `extras` 中，保证向前兼容。
+- 导出数值保留 6 位小数；`migrate()` 按版本逐级升级，写入永远输出当前版本。
+
+### 9.2 存储与导入导出
+
+| 项 | 方案 |
+| --- | --- |
+| 内部存档 | `context.filesDir/saves/*.field.json`，槽位索引扫描目录（无数据库） |
+| 自动存档 | `filesDir/autosave.field.json`，15s 或切后台时写入 |
+| 导出 | SAF `ACTION_CREATE_DOCUMENT`（`application/json`），无需存储权限 |
+| 导入 | SAF `ACTION_OPEN_DOCUMENT`，读取后校验并另存为新槽位 |
+| 分享 | `ACTION_SEND` 附带 JSON 文件 |
+| 缩略图 | 不落盘图片；槽位卡片用主色块 + 文字元数据，避免存储成本 |
+
+### 9.3 自动保存与异常恢复
+
+- 写入使用"临时文件 + rename"原子替换，避免断电损坏。
+- 启动时若 `autosave` 解析失败：保留损坏副本 `autosave.corrupt.json`，提示用户，回退到最近成功槽位。
+- 世界变更标记：源/探针增删改、参数变更、相机变更都会置脏；只聚焦暂停时也保存一次（避免误触丢失）。
 
 ---
 
-## 12. 性能预算
+## 10. 工程架构
 
-目标设备：2020 年后中端笔记本（4 核 / 16GB / 集显），Chrome 120+。
+### 10.1 技术栈
 
-| 指标 | 目标 | 测量方式 |
+| 维度 | 选择 | 版本/说明 |
 | --- | --- | --- |
-| 稳态帧率 | 60 FPS（200 动态 + 400 静态） | 连续 10s 的 p95 帧时间 ≤ 16.7ms |
-| 物理耗时 | ≤ 5 ms / 帧（上述场景） | `performance.now()` 包裹 `world.step` |
-| 渲染耗时 | ≤ 5 ms / 帧 | 同上，包裹渲染 |
-| 内存 | 稳态无持续增长（5 分钟 Δ < 5MB） | 浏览器 Memory 面板采样 |
-| 启动 | 首帧 < 1.5 s | Performance timeline |
-| 大场景降级 | 1000 体 ≥ 30 FPS | 自动降级生效后测 |
+| 语言 | Kotlin | 2.0+，`explicitApi` 关闭，JVM target 17 |
+| UI | Jetpack Compose + Material3（仅用基础组件，主题全面定制） | BOM 2024.09+ |
+| 构建 | Gradle KTS + Version Catalog | AGP 8.6+ |
+| minSdk / target | 26 / 35 | Android 8.0 起 |
+| 渲染 | Compose Canvas（降级路径 SurfaceView） | — |
+| 序列化 | kotlinx.serialization JSON | 避免反射 |
+| 异步 | Kotlin Coroutines + StateFlow | 单线程模拟 |
+| 测试 | JUnit4（core）+ Compose UI Test + Robolectric（少量） | — |
+| 静态检查 | ktlint + detekt + Android Lint | CI 门禁 |
+| 分发 | GitHub Releases（APK） | 后续考虑 Play Store |
 
-优化手段（按优先级）：
+### 10.2 模块划分
 
-1. 热路径零分配：求解器复用临时向量（模块级 scratch 对象），禁止在 `step` 内 `new`。
-2. 数值就地运算：`Vec2` 提供 `addInPlace/subInPlace` 等变体。
-3. 接触对与流形用**对象池**复用，按帧回收。
-4. 休眠 + 岛划分，跳过静止堆叠的求解。
-5. 渲染剔除 + `Path2D` 缓存 + 细粒度脏标记（v0.3）。
-6. WebGL2 批量实例化渲染（v0.3，仅在 Canvas 2D 实测触顶后启用）。
+```mermaid
+flowchart TB
+  subgraph App[":app · Android"]
+    Nav["AppNavHost<br/>+ YellowBlockWipe"]
+    UI["HUD / 工具带 / 面板 / 存档面板"]
+    Canvas["FieldCanvas<br/>Compose Canvas"]
+    VM["SandboxViewModel<br/>StateFlow&lt;UiState&gt;"]
+    Repo["SaveRepository<br/>filesDir / SAF"]
+  end
+  subgraph Core[":core · 纯 JVM"]
+    Sim["SimulationEngine<br/>固定步长 / 积分 / 边界 / 碰撞"]
+    Fields["FieldModel<br/>5 类场源 + 叠加"]
+    Viz["FieldSampler<br/>网格采样 / RK4 流线"]
+    Codec["SceneCodec<br/>JSON v2 + 校验 + 迁移"]
+    Math["Vec2 / AABB / RNG"]
+  end
+  Nav --> VM
+  UI --> VM
+  VM --> Sim
+  Sim --> Fields
+  Sim --> Viz
+  Canvas --> Viz
+  VM --> Repo
+  Repo --> Codec
+  Codec --> Sim
+```
+
+- `:core` 无 Android 依赖，可在 JVM 上跑全部物理与场测试，保证可回归、可基准。
+- UI 只读 `UiState`（含 `FrameSnapshot`），所有变更通过 `Intent`/方法调用写入 `ViewModel`，禁止 UI 直接持有引擎。
+- 依赖注入：v0.1 手动构造（`AppContainer`），不引入 Hilt，减少构建复杂度。
+
+### 10.3 目录结构
+
+```text
+field/
+├─ core/                                  # 纯 Kotlin 库
+│  └─ src/main/kotlin/dev/field/core/
+│     ├─ math/                            # Vec2, AABB, 插值, RNG
+│     ├─ fields/                          # FieldSource 与五类实现
+│     ├─ sim/                             # SimulationEngine, Probe, World, 碰撞
+│     ├─ viz/                             # 网格采样, RK4 追踪, 色带
+│     ├─ scene/                           # Scene 模型 + 编解码 + 迁移
+│     └─ util/                            # 冻结/NaN 守卫/诊断
+├─ app/
+│  └─ src/main/kotlin/dev/field/app/
+│     ├─ MainActivity.kt
+│     ├─ nav/                             # Screen, stack, AppNavHost
+│     ├─ transition/                      # YellowBlockWipe
+│     ├─ ui/theme/                        # 颜色/字体/尺寸 token
+│     ├─ ui/sandbox/                      # FieldCanvas, HUD, 工具带, 面板
+│     ├─ ui/saves/                        # 存档槽位
+│     ├─ ui/settings/
+│     ├─ ui/help/
+│     └─ data/                            # SaveRepository, SAF
+├─ app/src/main/res/                       # strings (zh/en), icons, themes
+├─ tests/  (core/src/test, app/src/androidTest)
+├─ gradle/libs.versions.toml
+├─ settings.gradle.kts
+└─ build.gradle.kts
+```
+
+### 10.4 线程模型
+
+- 模拟与渲染在主线程，由 `withFrameNanos` 驱动（v0.1）：状态无竞争、实现最简单。
+- 场热图/流线的重算在 `Dispatchers.Default` 后台执行，完成后 `withContext(Main)` 发布 `ImageBitmap`/`List<Polyline>`，主线程仅绘制。
+- 若性能不达标则切换到"模拟独立线程 + 双缓冲快照"（`FieldCanvas` 接口不变），该方案在 §12 中作为备选。
+- 切后台：`ON_STOP` 暂停模拟并保存；恢复时不补偿时间（避免一次跳很多步）。
 
 ---
 
-## 13. 确定性与测试
+## 11. 性能与功耗
 
-### 13.1 确定性规则
+| 档位 | 判定 | 粒子 | 子步 | 拖尾 | 热图 | 目标 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 高 | 8 核 / 2022 年后 | 4000 | 2 | 32 | 96×54 | 60 FPS |
+| 中 | 主流 | 2000 | 2 | 24 | 96×54 | 60 FPS |
+| 低 | 入门 | 800 | 1 | 12 | 64×36 | 30 FPS |
 
-- 物理只由 `world.step(dt)` 驱动，dt 恒定；所有随机性（如"随机生成场景"）走可种子化 `rng`。
-- 碰撞对、接触点、求解顺序均按稳定键排序，不依赖 `Map` 迭代顺序或创建时机。
-- 热路径禁用三角函数：角度变化时缓存 `sin/cos`。
-- 不用 `Math.random`、`Date.now`、`Promise`、`requestAnimationFrame` 于 `core/physics`。
-- 跨平台浮点差异用**容差**处理（见下），不追求 bit-exact。
+- 无每帧分配：`FieldSample`、临时 `Vec2`、接触数组全部复用；`Probe` 用 `ArrayList` + 对象池增长。
+- 探针绘制按数量切换：≤ 400 用 `drawCircle`（带描边），> 400 用 `drawPoints`（`PointMode.Points` + 圆头），跳过描边。
+- 热图仅在脏标记或 500ms 节流时重算，使用 `IntArray` → `ImageBitmap`。
+- 暂停、无变更、切后台时不重绘；`invalidate` 由状态驱动。
+- 电池保护：可开启"省电模式"（30 FPS + 关闭拖尾 + 关闭热图）。
+- 场源与探针上限固定，内存峰值可控（目标 < 120MB）。
 
-### 13.2 测试矩阵
+---
+
+## 12. 测试与 CI
 
 | 层级 | 内容 | 工具 |
 | --- | --- | --- |
-| 单元 | `Vec2/Mat22/AABB`、凸包、SAT、裁剪、质量/惯量公式 | Vitest |
-| 物理行为 | 单球自由落体解析解误差 < 1%；球静止在斜面上不滑（摩擦角内）；10 层箱堆 10s 内位移 < 2cm | Vitest 无头 |
-| 确定性回放 | 记录初始场景 + 1000 步，比对最终状态（位置容差 1e-6，速度 1e-5） | Vitest + 快照文件 |
-| 属性测试 | 任意合法场景模拟 500 步：无 NaN、无 |速度| > 40、总能量不增（弹性=0 时单调不增） | fast-check（可选） |
-| 序列化 | 导出→导入→导出，语义等价；非法输入给出字段级错误 | Vitest |
-| e2e 冒烟 | 打开页面、加载示例、拖拽一个物体、导出场景 | Playwright |
+| 数学单元 | Vec2/AABB、RK4 精度、软化函数 | JUnit + kotlin.test |
+| 场解析 | 点电荷场强 `1/r` 衰减、偶极子对称性、洛伦兹力垂直于速度且不做功、阻力终端速度 `v_t = sqrt(mg/c2)` | JUnit（容差断言） |
+| 模拟行为 | 半隐式 vs RK4 能量误差、边界三种模式、碰撞不重叠、NaN 守卫 | JUnit 无头 |
+| 确定性 | 600 步回放快照，位置容差 1e-6 | 快照文件 |
+| 编解码 | 导出→导入→导出等价；非法 JSON 字段级报错；v2→v2 迁移 | JUnit |
+| UI | 工具选择、放置、撤销、存档面板、转场完成 | Compose UI Test |
+| 性能 | 宏基准（启动、帧时间） | Macrobenchmark（可选） |
 
-CI 门禁：`lint` → `typecheck` → `test` → `build`，全绿方可合并。
+CI（GitHub Actions）：
 
----
+```text
+lint → :core:test → :app:testDebugUnitTest → assembleDebug → 上传 APK artifact
+```
 
-## 14. 错误处理与边界
-
-- **输入校验**：所有用户输入（导入 JSON、参数滑杆）在边界处校验；物理层信任内部数据。
-- **数值守卫**：`step` 后检查非有限值；命中即冻结体并上报，不清空整个场景。
-- **资源上限**：单场景最多 2000 刚体、500 关节；超限拒绝并提示。
-- **退化几何**：自动凸包 + 最小面积过滤；退化时抛 `InvalidShapeError` 并在 UI 提示。
-- **渲染健壮性**：`Path2D` 构建失败时跳过该体绘制，不阻塞整帧。
-- **错误上报**：v0.1 仅控制台 + 状态栏提示，不接入第三方监控。
+- JDK 17 + Android SDK 35；Gradle 缓存；PR 必须全绿。
+- 发布：推送 tag `v0.x.y` 触发 `assembleRelease`（签名密钥放 Secrets，绝不入库）。
 
 ---
 
-## 15. 里程碑
+## 13. 里程碑
 
 | 里程碑 | 范围 | 验收标准（DoD） |
 | --- | --- | --- |
-| **M0 骨架** | Vite + TS + ESLint + Vitest + CI；目录与接口占位 | `npm run dev/build/test` 全通过；CI 绿 |
-| **M1 物理核心** | 数学库、凸包、SAT、流形、求解器、积分、休眠 | 圆球落地解析误差 < 1%；10 层箱堆 10s 稳定；单元 + 回放测试通过 |
-| **M2 渲染与交互** | 相机、Canvas 渲染、拖拽（mouse joint）、创建/删除、平移缩放 | 200 体场景 60 FPS；拖拽不穿透不爆冲；调试层可切换 |
-| **M3 关节与场景** | 5 种关节、JSON v1 导入导出、3 个示例、撤销栈（可选） | 关节示例可玩；导出→导入结果等价；回放测试纳入 CI |
-| **M4 打磨发布** | UI 面板、性能优化、文档、部署 | 达到 §12 全部性能指标；公开可访问；打 `v0.1.0` tag |
+| **M0 骨架** | Gradle 多模块、Compose 主题、空白世界、CI | `assembleDebug` 通过；CI 全绿；转场空实现可跑 |
+| **M1 场核心** | 五类场 + 叠加、粒子积分、边界/碰撞、NaN 守卫 | 解析解测试通过（电荷 `1/r²`、洛伦兹、终端速度）；2000 探针 60 FPS（中端） |
+| **M2 渲染与可视化** | Canvas 渲染、相机手势、箭头/流线/热图/拖尾 | 四种可视化可切换；缩放拖动流畅；30 场源不卡顿 |
+| **M3 UI 与存档** | Mindustry 风格 HUD/工具带/面板、存档槽位、SAF 导入导出、撤销栈、自动存档 | 就地编辑全流程可用；存读档往返等价；崩溃恢复有效 |
+| **M4 转场与发布** | 黄色斜块转场、微动效、无障碍、性能降档、APK 签名、文档 | 所有页面转场统一；减弱动画生效；达到 §11 性能指标；发布 APK |
 
-依赖关系：M1 是硬前置；M2 可与 M1 部分并行（渲染只依赖快照格式）；M3 依赖 M1+M2。
-
----
-
-## 16. 关键接口草案
-
-```ts
-export type Vec2 = { x: number; y: number };
-export type BodyId = number;
-
-export interface WorldOptions {
-  gravity?: Vec2;                 // 默认 (0, -9.81)
-  fixedDt?: number;               // 默认 1/60
-  velocityIterations?: number;    // 默认 8
-  positionIterations?: number;    // 默认 3
-  maxSubSteps?: number;           // 默认 4
-  allowSleep?: boolean;           // 默认 true
-}
-
-export interface BodyDef {
-  type: 'dynamic' | 'static' | 'kinematic';
-  position: Vec2;
-  angle?: number;
-  shape: ShapeDef;
-  material?: { density?: number; friction?: number; restitution?: number };
-  fixedRotation?: boolean;
-  userData?: unknown;
-}
-
-export type ShapeDef =
-  | { type: 'circle'; radius: number }
-  | { type: 'polygon'; vertices: Vec2[] }          // 自动凸包化
-  | { type: 'compound'; parts: ShapeDef[] };
-
-export interface World {
-  createBody(def: BodyDef): BodyId;
-  destroyBody(id: BodyId): void;
-  createJoint(def: JointDef): JointId;
-  destroyJoint(id: JointId): void;
-
-  step(dt: number): void;                          // 固定步长语义
-  snapshot(alpha?: number): WorldSnapshot;         // 只读渲染数据
-
-  queryPoint(p: Vec2): BodyId[];                   // 命中测试
-  queryAABB(box: AABB, mask?: QueryMask): BodyId[];
-  raycast(origin: Vec2, dir: Vec2, maxDist: number): RaycastHit | null;
-}
-```
-
-> `snapshot()` 返回**扁平只读结构**（TypedArray 或普通数组由实现决定），避免渲染层持有可变物理对象；具体字段在 M2 冻结并写入 README。
+依赖：M1 → M2 → M3；M4 的转场可与 M3 并行开发（独立组件）。
 
 ---
 
-## 17. 风险与取舍
+## 14. 风险与取舍
 
-| 风险 | 影响 | 缓解 / 决策 |
+| 风险 | 影响 | 缓解 |
 | --- | --- | --- |
-| 自研求解器调参成本高，堆叠抖动 | 用户体验的核心指标 | 先对齐 Box2D-lite 参数；用固定的"10 层箱堆 10s"回归测试锁死稳定性 |
-| Canvas 2D 在大量物体时触顶 | 大场景无法 60 FPS | 自动降级 + 剔除；预埋 WebGL2 渲染器接口（`Renderer` 接口不变） |
-| 高长宽比 / 极细多边形不稳定 | 碰撞法线跳变 | 凸包 + 最小面积过滤 + 建议上限 20 顶点；文档明示限制 |
-| 浮点跨平台差异 | 回放测试脆弱 | 容差断言；顺序稳定；不承诺 bit-exact |
-| 拖拽制造穿透/爆炸 | 明显 bug 感 | 强制 mouse joint（软约束 + 力上限），禁止直接写位置 |
-| 范围蔓延（流体/软体/脚本） | 交付延期 | §2.2 非目标 + 开放问题单独立项 |
+| Compose Canvas 在大量探针时掉帧 | 核心体验 | 批量 `drawPoints`、跳过描边、降档；预留 SurfaceView 降级路径 |
+| 场奇点导致数值爆炸 | 模拟失效 | 软化 ε + 力上限 + NaN 冻结 + 速度钳制 |
+| 手势冲突（放置 vs 平移 vs 缩放） | 误操作 | 明确工具状态机 + 8dp/300ms 判定阈值 + 双指优先 |
+| 长斜块转场造成输入穿透或闪白 | 明显 bug | 覆盖层全屏拦截 + 首尾 alpha 保持不透明 + 中点单次回调 |
+| 不同 Android 版本/厂商的性能差异 | 掉帧、发热 | 三档降级 + 自动降档 + 省电模式 |
+| 存档损坏/丢失 | 用户数据损失 | 原子写入 + 自动存档 + 损坏副本保留 |
+| 场模型"不物理" | 教学误导 | UI 标注"演示模型"；文档列明近似与适用范围 |
 
 ---
 
-## 18. 开放问题（需要产品决策）
+## 15. 开放问题
 
-1. **软体 / 流体**是否需要？若要，倾向"粒子 + PBF 流体"作为独立实验场景，不进入刚体核心。
-2. **用户脚本 API**（在场景里写 JS 控制力/事件）是否作为 v0.4 特性？会影响 `core` 的安全边界（需沙箱或明确"可信用户"定位）。
-3. `core` 是否发布为独立 npm 包（`@field/engine`）？若发布，API 稳定性与文档成本需要单独立项。
-4. 是否支持 URL 分享场景（场景压缩进 hash）？与导出按钮的优先级排序。
+1. 是否要"真实 SI 常数"模式（教学场景），与默认玩具单位并存？
+2. 是否需要把 `:core` 发布为独立库（JVM/Android），供他人做场可视化？
+3. 跨平台（iOS）是否在路线图内？若需要，建议尽早把渲染层抽象为接口，UI 侧用 KMP Compose Multiplatform。
+4. 云端分享（生成分享码/URL）与本地文件分享的优先级？
+5. 是否需要音频（场强音效、放置音）与触觉反馈？
 
 ---
 
-## 附录 A：一次 `world.step` 的伪代码
+## 16. 补充与默认决策（你未指定，本版按以下默认处理）
+
+| 议题 | 默认决策 | 理由 / 可否更改 |
+| --- | --- | --- |
+| 应用形态 | **原生 Android（Kotlin + Compose）** | 你明确偏好安卓；Mindustry 的 UI 观感用原生最易复刻。若后续要 iOS，再迁 KMP |
+| 屏幕方向 | **横屏优先**，竖屏可用 | 场可视化需要横向空间；竖屏重排为"世界在上、面板抽屉在下" |
+| 场源数量 | 上限 200，常用 20–30 | 控制采样成本；上限可调 |
+| 单位 | **玩具单位**（`kE=kM=G=1`） | 滑杆数值直观；真实 SI 作为可选模式（§15） |
+| 磁场的 2D 表示 | 双磁极近似，`Bz` 垂直屏幕 | 2D 无法严格表达 3D 偶极；近似足够直观 |
+| 探针碰撞 | 默认开启，可关 | 关闭后适合观察纯场运动 |
+| 是否保留刚体 | v0.1 **不做**多边形刚体/关节 | 当前核心是场；刚体堆叠与场模拟目标不匹配 |
+| 存档策略 | 自动存档 + 手动槽位 + 原子写入 | 移动端必须防误触/断电 |
+| 权限 | **零敏感权限**（导出走 SAF） | 无需 READ/WRITE_EXTERNAL_STORAGE |
+| 语言 | 中文 + 英文 | `strings.xml` 双语 |
+| 分发 | GitHub Releases APK | 与应用仓库一致；Play Store 后置 |
+| 崩溃/分析 | v0.1 不做第三方统计 | 减少依赖与隐私负担 |
+| 首屏 | 恢复上次世界；首次运行 3 步引导 | 符合"存档内操作"理念 |
+
+---
+
+## 附录 A：场与受力公式汇总
 
 ```text
-function step(dt):
-    if dt <= 0: return
-    updateForces()                    # 重力、用户外力、关节马达
-    updateAABBs()
-    pairs = broadphase.computePairs() # 空间哈希候选 + 去重
-    contacts = narrowphase.generate(pairs)
-    solver.prepare(contacts)          # warm start：施加上一帧累积冲量
-    for i in 0..velocityIterations:
-        for c in contacts: solveVelocity(c)
-        for j in joints:   solveVelocity(j)
-    integrateVelocities(dt)
-    for i in 0..positionIterations:
-        for c in contacts: solvePosition(c)
-        for j in joints:   solvePosition(j)
-    integratePositions(dt)
-    updateSleepStates(dt)
-    checkFiniteState()
-    emitEvents()                      # 碰撞开始/结束等
+电场（点电荷，软化）：
+  E(p) = kE · Σ q_i · (p - p_i) / (|p - p_i|² + ε²)^(3/2)
+  F = q_probe · E
+
+电势：
+  V(p) = kE · Σ q_i / sqrt(|p - p_i|² + ε²)
+
+磁场（双磁极近似，Bz 垂直屏幕）：
+  Bz(p) = kM · Σ ±m_i / (|p - p_i|² + ε²)
+  洛伦兹力（2D）：F = q · Bz · (v_y, -v_x)          // F ⟂ v，且 F·v = 0
+
+重力 / 引力：
+  g(p) = g0 + G · Σ M_i · (p - p_i) / (|p - p_i|² + ε²)^(3/2)
+
+阻力（相对速度）：
+  v_rel = v - wind
+  F_drag = -(c1 · v_rel + c2 · |v_rel| · v_rel)
+
+合力：
+  a = (q/m)·E + (q·Bz/m)·(v_y, -v_x) + g + F_drag/m
+
+半隐式 Euler：
+  v_{n+1} = v_n + a_n · dt
+  p_{n+1} = p_n + v_{n+1} · dt
 ```
 
-## 附录 B：默认参数总表
+## 附录 B：参数与默认值
 
-| 参数 | 默认 | 范围（UI） |
+| 参数 | 默认 | UI 范围 |
 | --- | --- | --- |
-| 重力 | `(0, -9.81)` | `gx ∈ [-20,20]`，`gy ∈ [-30,10]` |
-| 固定步长 | `1/60 s` | `1/120 s – 1/30 s` |
-| 速度迭代 | 8 | 2 – 20 |
-| 位置迭代 | 3 | 0 – 10 |
-| 子步上限 | 4 | 1 – 8 |
-| `baumgarte` | 0.2 | 0 – 0.4 |
-| `slop` | 0.005 m | 0.001 – 0.02 m |
-| 恢复系数阈值 | 1.0 m/s | 0.1 – 2.0 m/s |
-| 最大线速度 | 40 m/s | 固定 |
-| 休眠速度阈值 | 0.05 m/s、0.05 rad/s | 固定 |
-| 休眠延时 | 0.5 s | 固定 |
+| 固定步长 | 1/60 s | 1/120 – 1/30 s |
+| 子步 | 2 | 1 – 4 |
+| 倍速 | 1× | 0.25× – 4× |
+| 软化 ε | 0.05 m | 0.01 – 0.2 m |
+| 最大线速度 | 60 m/s | 固定 |
+| 碰撞恢复系数 | 0.2 | 0 – 1 |
+| 电场常数 kE | 1.0 | 0.1 – 5 |
+| 磁场常数 kM | 1.0 | 0.1 – 5 |
+| 引力常数 G | 1.0 | 0.1 – 5 |
+| 阻力系数上限 | 5.0 | 0 – 5 |
+| 探针拖尾 | 32 点 | 0 – 48 |
+| 自动存档间隔 | 15 s | 5 – 60 s |
+| 撤销栈 | 20 | 固定 |
 
-## 附录 C：参考
+## 附录 C：固定步长循环（Compose）
 
-- Erin Catto, *Iterative Dynamics with Temporal Coherence* / GDC 物理教程（顺序冲量、warm starting）。
-- Box2D（b2DynamicTree、b2MouseJoint、b2ContactSolver 的公开实现思路）。
-- "Separating Axis Theorem" 与多边形裁剪的标准接触生成流程。
+```kotlin
+LaunchedEffect(Unit) {
+    var accumulator = 0.0
+    var last = withFrameNanos { it }
+    while (isActive) {
+        val now = withFrameNanos { it }
+        val dt = ((now - last) / 1e9).coerceIn(0.0, 0.25)
+        last = now
+        if (running) {
+            accumulator += dt * speed
+            var steps = 0
+            while (accumulator >= fixedDt && steps < 4) {
+                engine.step(fixedDt)
+                accumulator -= fixedDt
+                steps++
+            }
+            if (steps == 4) accumulator = 0.0     // 丢弃余额，避免死亡螺旋
+        }
+        frame = engine.snapshot(alpha = (accumulator / fixedDt).toFloat())
+    }
+}
+```
+
+## 附录 D：参考
+
+- Mindustry（Anuken/Mindustry）：UI 配色、直角面板、底部工具带、就地编辑的交互范式。
+- Erin Catto, *Iterative Dynamics*（仅作为数值稳定与固定步长实践的参考；v0.1 不实现刚体求解器）。
+- RK4 流线追踪与软化势场的通用做法（`ε`-softening）。
+- Android 官方：Compose Canvas 绘制、SAF、Macrobenchmark、Baseline Profile。
+</description>
