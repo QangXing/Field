@@ -120,8 +120,7 @@ fun SavesScreen(
                 item {
                     SaveCard(
                         title = "自动存档",
-                        scene = autosave,
-                        time = null,
+                        detail = "场 ${autosave.sources.size} · 物体 ${autosave.bodies.size} · 规则 ${activeRuleCount(autosave.rules)}",
                         highlighted = true,
                         onOpen = { onOpen(autosave) },
                         onPreview = { preview = autosave },
@@ -137,8 +136,7 @@ fun SavesScreen(
                     val demo = Defaults.demoScene()
                     SaveCard(
                         title = "内置演示世界（只读）",
-                        scene = demo,
-                        time = null,
+                        detail = "场 ${demo.sources.size} · 物体 ${demo.bodies.size} · 规则 ${activeRuleCount(demo.rules)}",
                         highlighted = false,
                         onOpen = { onOpen(demo) },
                         onPreview = { preview = demo },
@@ -161,11 +159,9 @@ fun SavesScreen(
             }
 
             items(entries, key = { it.file.absolutePath }) { entry ->
-                val scene = remember(entry, refresh) { repo.load(entry.file).getOrNull() }
                 SaveCard(
                     title = entry.name,
-                    scene = scene,
-                    time = formatTime(entry.modified),
+                    detail = formatTime(entry.modified) + " · 点「查看」预览",
                     highlighted = false,
                     onOpen = {
                         repo.load(entry.file)
@@ -339,8 +335,7 @@ fun SavesScreen(
 @Composable
 private fun SaveCard(
     title: String,
-    scene: Scene?,
-    time: String?,
+    detail: String,
     highlighted: Boolean,
     onOpen: () -> Unit,
     onPreview: () -> Unit,
@@ -348,7 +343,7 @@ private fun SaveCard(
     onRename: (() -> Unit)?,
     onDelete: (() -> Unit)?,
 ) {
-    LabPanel(Modifier.fillMaxWidth(), accent = highlighted || time != null) {
+    LabPanel(Modifier.fillMaxWidth(), accent = highlighted) {
         Column(Modifier.fillMaxWidth().padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -359,12 +354,8 @@ private fun SaveCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        when {
-                            scene == null -> "无法读取"
-                            time == null -> "场 ${scene.sources.size} · 物体 ${scene.bodies.size} · 规则 ${activeRuleCount(scene.rules)}"
-                            else -> "$time · 场 ${scene.sources.size} · 物体 ${scene.bodies.size}"
-                        },
-                        color = if (scene == null) Danger else TextSecondary,
+                        detail,
+                        color = TextSecondary,
                         fontSize = 9.sp,
                     )
                 }

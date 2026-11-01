@@ -50,6 +50,9 @@ class SimulationEngine(
         val h = dt / steps
         var contacts = 0
 
+        for (probe in probes) probe.prevPosition = probe.position
+        for (body in bodies) body.prevPosition = body.position
+
         repeat(steps) {
             for (probe in probes) {
                 probe.impact = false
@@ -261,8 +264,8 @@ class SimulationEngine(
             return
         }
         val speedSquared = body.velocity.lengthSquared
-        if (speedSquared > MAX_SPEED * MAX_SPEED) {
-            val scale = MAX_SPEED / sqrt(speedSquared)
+        if (speedSquared > BODY_MAX_SPEED * BODY_MAX_SPEED) {
+            val scale = BODY_MAX_SPEED / sqrt(speedSquared)
             body.velocity = body.velocity * scale
         }
     }
@@ -834,6 +837,7 @@ class SimulationEngine(
 
     companion object {
         const val MAX_SPEED: Double = 60.0
+        const val BODY_MAX_SPEED: Double = 25.0
         const val RESTITUTION: Double = 0.2
         const val OPEN_MARGIN: Double = 0.5
         const val TRAIL_MAX_POINTS: Int = 32

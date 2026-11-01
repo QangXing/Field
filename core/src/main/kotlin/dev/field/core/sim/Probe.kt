@@ -17,6 +17,9 @@ class Probe(
 ) {
     var position: Vec2 = position
     var velocity: Vec2 = velocity
+
+    /** Position at the start of the most recent physics step, for render interpolation. */
+    var prevPosition: Vec2 = position
     var mass: Double = mass
     var charge: Double = charge
     var radius: Double = radius
@@ -33,9 +36,9 @@ class Probe(
 
     private val trailBuffer = ArrayDeque<Vec2>(64)
 
-    /** Snapshot of the trail, oldest first. */
+    /** Read-only view of the trail, oldest first. Does not allocate on access. */
     val trail: List<Vec2>
-        get() = trailBuffer.toList()
+        get() = trailBuffer
 
     fun pushTrail(maxPoints: Int) {
         if (maxPoints <= 0) {

@@ -125,4 +125,31 @@ class PhysicsV3Test {
         assertEquals(0.0, engine.probes[0].charge, 1e-9)
         assertEquals(0.0, engine.probes[1].charge, 1e-9)
     }
+
+    @Test
+    fun stepRecordsPreviousPositionsForInterpolation() {
+        val engine = SimulationEngine(
+            field = FieldModel(emptyList()),
+            bounds = Aabb(-10.0, -10.0, 10.0, 10.0),
+            settings = SimSettings(fixedDt = 0.05, subSteps = 1, collisions = false),
+            probes = mutableListOf(Probe(1, Vec2.ZERO, Vec2(2.0, 0.0))),
+            bodies = mutableListOf(Body(1, Vec2.ZERO, Vec2(2.0, 0.0))),
+        )
+        engine.step()
+        assertEquals(0.0, engine.probes[0].prevPosition.x, 1e-12)
+        assertEquals(0.1, engine.probes[0].position.x, 1e-12)
+        assertEquals(0.0, engine.bodies[0].prevPosition.x, 1e-12)
+    }
+
+    @Test
+    fun bodySpeedIsClampedLowerThanProbes() {
+        val engine = SimulationEngine(
+            field = FieldModel(emptyList()),
+            bounds = Aabb(-500.0, -500.0, 500.0, 500.0),
+            settings = SimSettings(fixedDt = 1.0 / 60.0, collisions = false),
+            bodies = mutableListOf(Body(1, Vec2.ZERO, Vec2(1000.0, 0.0))),
+        )
+        engine.step()
+        assertEquals(SimulationEngine.BODY_MAX_SPEED, engine.bodies[0].velocity.length, 1e-9)
+    }
 }

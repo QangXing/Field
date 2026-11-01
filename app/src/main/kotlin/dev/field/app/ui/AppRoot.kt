@@ -30,7 +30,9 @@ import dev.field.app.ui.screens.MenuScreen
 import dev.field.app.ui.screens.SandboxScreen
 import dev.field.app.ui.screens.SavesScreen
 import dev.field.app.ui.transition.YellowWipeOverlay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class AppScreen { MENU, SAVES, SETTINGS, HELP, BACKGROUND, SANDBOX }
 
@@ -89,8 +91,11 @@ fun FieldLabApp() {
 
     fun leaveSandbox() {
         editor?.let { state ->
-            repo.saveAutosave(state.toScene())
+            val scene = state.toScene()
             state.dirty = false
+            scope.launch {
+                withContext(Dispatchers.IO) { repo.saveAutosave(scene) }
+            }
         }
         go(AppScreen.MENU)
     }

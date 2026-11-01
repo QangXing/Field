@@ -74,6 +74,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     var rotationDeg by mutableStateOf(0)
     var isRunning by mutableStateOf(true)
     var tick by mutableStateOf(0)
+
+    /** Time interpolation factor between the previous and current physics step. */
+    var renderAlpha by mutableStateOf(1.0f)
     var dirty by mutableStateOf(false)
     var toastMessage by mutableStateOf<String?>(null)
     var toastToken by mutableStateOf(0)
@@ -503,6 +506,8 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     fun moveBodyBy(id: Long, delta: Vec2) {
         val body = bodies.firstOrNull { it.id == id } ?: return
         body.position = body.position + delta
+        body.prevPosition = body.position
+        renderAlpha = 1f
         tick++
         markDirty()
     }

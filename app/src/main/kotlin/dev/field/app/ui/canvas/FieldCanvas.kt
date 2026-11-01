@@ -106,9 +106,6 @@ fun FieldCanvas(state: EditorState, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     val handleRadius = with(density) { 26.dp.toPx() }
 
-    @Suppress("UNUSED_VARIABLE")
-    val frameTick = state.tick
-
     val snapshot = state.sources.toList()
     val bodyTick = state.bodies.size
     val fieldModel = remember(snapshot, state.globalGravity, state.rules.gravityEnabled) {
@@ -384,6 +381,13 @@ fun FieldCanvas(state: EditorState, modifier: Modifier = Modifier) {
                 }
             },
     ) {
+        // Reading the frame tick and interpolation alpha inside the draw lambda
+        // invalidates drawing only; it avoids recomposing the whole sandbox UI at 60 Hz.
+        @Suppress("UNUSED_VARIABLE")
+        val frameTick = state.tick
+        @Suppress("UNUSED_VARIABLE")
+        val alpha = state.renderAlpha
+
         val zoom = state.zoom.toFloat()
         val center = state.cameraCenter
         val width = size.width
@@ -446,9 +450,9 @@ fun FieldCanvas(state: EditorState, modifier: Modifier = Modifier) {
             drawFrame(state, source, textMeasurer, ::sx, ::sy, zoom, density.density)
         }
 
-        drawBodies(state, fieldModel, textMeasurer, ::sx, ::sy, zoom, density.density)
+        drawBodies(state, fieldModel, textMeasurer, ::sx, ::sy, zoom, density.density, alpha)
 
-        drawProbes(state, fieldModel, ::sx, ::sy, zoom, density.density)
+        drawProbes(state, fieldModel, ::sx, ::sy, zoom, density.density, alpha)
 
         for (ghost in ghosts) {
             drawGhost(ghost, textMeasurer, ::sx, ::sy, zoom)
@@ -748,13 +752,20 @@ private fun DrawScope.drawBodies(
     sy: (Double) -> Float,
     zoom: Float,
     density: Float,
+    alpha: Float,
 ) {
     val bodies = state.bodies
     if (bodies.isEmpty()) return
     val scale = max(8f, 0.5f * zoom)
+    val blend = alpha.coerceIn(0f, 1f).toDouble()
 
     for (body in bodies) {
-        val center = Offset(sx(body.position.x), sy(body.position.y))
+        val renderPosition = if (body.prevPosition.isFinite() && body.position.isFinite()) {
+            body.prevPosition + (body.position - body.prevPosition) * blend
+        } else {
+            body.position
+        }
+        val center = Offset(sx(renderPosition.x), sy(renderPosition.y))
         val radius = (body.size * zoom).toFloat().coerceAtLeast(4f)
         val color = when {
             body.charge > 0.05 -> FieldElectric
@@ -898,29 +909,40 @@ private fun DrawScope.drawProbes(
     sy: (Double) -> Float,
     zoom: Float,
     density: Float,
+    alpha: Float,
 ) {
-    val trails = state.visuals.trails && state.rules.trails
-    if (trails) {
-        val probes = state.engine.probes
-        val drawTrails = probes.size <= 900
+    val probes = state.engine.probes
+    val blend = alpha.coerceIn(0f, 1f).toDouble()
+
+    fun renderPosition(probe: dev.field.core.sim.Probe): Vec2 =
+        if (probe.prevPosition.isFinite() && probe.position.isFinite()) {
+            probe.prevPosition + (probe.position - probe.prevPosition) * blend
+        } else {
+            probe.position
+        }
+
+    if (state.visuals.trails && state.rules.trails) {
+        val detailed = probes.size <= 200
         for (probe in probes) {
             val trail = probe.trail
             if (trail.size < 2) continue
-            if (drawTrails) {
-                for (index in 1 until trail.size) {
-                    val alpha = 0.06f + 0.5f * (index.toFloat() / trail.size)
-                    drawLine(
-                        color = if (probe.faulted) Danger.copy(alpha = alpha) else FieldElectric.copy(alpha = alpha),
-                        start = Offset(sx(trail[index - 1].x), sy(trail[index - 1].y)),
-                        end = Offset(sx(trail[index].x), sy(trail[index].y)),
-                        strokeWidth = 1.4f,
-                    )
+            val color = if (probe.faulted) Danger else FieldElectric
+            if (detailed) {
+                // One path per probe instead of ~32 individual draw calls.
+                val path = Path()
+                val start = max(0, trail.size - 24)
+                val first = trail[start]
+                path.moveTo(sx(first.x), sy(first.y))
+                for (index in start + 1 until trail.size) {
+                    val point = trail[index]
+                    path.lineTo(sx(point.x), sy(point.y))
                 }
+                drawPath(path, color.copy(alpha = 0.30f), style = Stroke(1.2f))
             } else {
-                val last = trail.last()
                 val first = trail.first()
+                val last = trail.last()
                 drawLine(
-                    FieldElectric.copy(alpha = 0.25f),
+                    color.copy(alpha = 0.18f),
                     Offset(sx(first.x), sy(first.y)),
                     Offset(sx(last.x), sy(last.y)),
                     strokeWidth = 1f,
@@ -929,9 +951,9 @@ private fun DrawScope.drawProbes(
         }
     }
 
-    if (state.rules.forceTorqueDisplay && state.engine.probes.size <= 220) {
+    if (state.rules.forceTorqueDisplay && probes.size <= 120) {
         val sample = dev.field.core.fields.FieldSample()
-        for (probe in state.engine.probes) {
+        for (probe in probes) {
             if (probe.faulted) continue
             fieldModel.sampleInto(probe.position, sample)
             val invMass = if (probe.mass > 0.0) 1.0 / probe.mass else 0.0
@@ -943,9 +965,10 @@ private fun DrawScope.drawProbes(
                     sample.gravity.y + sample.uniform.y,
             ) * probe.mass
             if (force.length > 1e-4) {
+                val position = renderPosition(probe)
                 drawForceArrow(
                     force,
-                    Offset(sx(probe.position.x), sy(probe.position.y)),
+                    Offset(sx(position.x), sy(position.y)),
                     Accent,
                     density,
                     alpha = 0.7f,
@@ -954,10 +977,11 @@ private fun DrawScope.drawProbes(
         }
     }
 
-    val points = ArrayList<Offset>(state.engine.probes.size)
+    val points = ArrayList<Offset>(probes.size)
     val faulted = ArrayList<Offset>()
-    for (probe in state.engine.probes) {
-        val offset = Offset(sx(probe.position.x), sy(probe.position.y))
+    for (probe in probes) {
+        val position = renderPosition(probe)
+        val offset = Offset(sx(position.x), sy(position.y))
         if (probe.faulted) faulted.add(offset) else points.add(offset)
     }
     val radius = max(2.2f, 0.12f * zoom).toFloat()
@@ -1063,7 +1087,7 @@ private fun addLayer(
     kind: FieldKind,
     color: Color,
 ) {
-    val samples = FieldViz.arrows(field, bounds, cols = 24, rows = 24, kind = kind)
+    val samples = FieldViz.arrows(field, bounds, cols = 12, rows = 16, kind = kind)
     val maxMagnitude = samples.maxOfOrNull { it.magnitude } ?: 0.0
     layers.add(ArrowLayer(color, samples, maxMagnitude))
 }

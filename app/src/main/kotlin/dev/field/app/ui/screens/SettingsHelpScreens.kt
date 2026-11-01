@@ -89,7 +89,7 @@ fun AppSettingsScreen(
             LabPanel(Modifier.fillMaxWidth()) {
                 SectionLabel("关于")
                 KeyValueRow("应用", "Field Lab")
-                KeyValueRow("版本", "0.2.0")
+                KeyValueRow("版本", "0.2.1")
                 KeyValueRow("平台", "Android 8.0+ · 竖屏")
                 KeyValueRow("引擎", "自研确定性场模拟")
                 KeyValueRow("权限", "无敏感权限")

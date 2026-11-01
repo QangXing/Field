@@ -30,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -76,7 +77,10 @@ import dev.field.core.sim.Boundary
 import dev.field.core.sim.BodyShape
 import dev.field.core.sim.Integrator
 import dev.field.core.viz.HeatmapMode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -91,14 +95,20 @@ fun SandboxScreen(
     var showSettingsPanel by remember { mutableStateOf(false) }
     var saveIndicator by remember { mutableStateOf<String?>(null) }
     var fps by remember { mutableStateOf(0) }
+    var liveProbeCount by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         if (uri != null) {
-            repo.export(state.toScene(), uri)
-                .onSuccess { state.toast("已导出到所选位置") }
-                .onFailure { state.toast("导出失败：${it.message}") }
+            val scene = state.toScene()
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { repo.export(scene, uri) }
+                result
+                    .onSuccess { state.toast("已导出到所选位置") }
+                    .onFailure { state.toast("导出失败：${it.message}") }
+            }
         }
     }
 
@@ -106,19 +116,26 @@ fun SandboxScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            repo.import(uri)
-                .onSuccess {
-                    val currentName = state.sceneName
-                    state.loadScene(it)
-                    if (it.name.isBlank()) state.sceneName = currentName
-                    state.toast("已导入：${state.sceneName}")
-                }
-                .onFailure { state.toast("导入失败：${it.message}") }
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { repo.import(uri) }
+                result
+                    .onSuccess {
+                        val currentName = state.sceneName
+                        state.loadScene(it)
+                        if (it.name.isBlank()) state.sceneName = currentName
+                        state.toast("已导入：${state.sceneName}")
+                    }
+                    .onFailure { state.toast("导入失败：${it.message}") }
+            }
         }
     }
 
     LaunchedEffect(state.isRunning, state.settings.speed) {
-        if (!state.isRunning) return@LaunchedEffect
+        if (!state.isRunning) {
+            state.renderAlpha = 1f
+            liveProbeCount = state.engine.probes.size
+            return@LaunchedEffect
+        }
         var previous = withFrameNanos { it }
         var accumulator = 0.0
         var frames = 0
@@ -132,16 +149,24 @@ fun SandboxScreen(
                 accumulator += elapsed * state.settings.speed
                 var steps = 0
                 while (accumulator >= fixed && steps < 4) {
-                    state.engine.step(fixed)
+                    try {
+                        state.engine.step(fixed)
+                    } catch (error: Throwable) {
+                        state.isRunning = false
+                        state.toast("模拟已暂停：${error.message ?: "未知错误"}")
+                        return@LaunchedEffect
+                    }
                     accumulator -= fixed
                     steps++
                 }
                 if (accumulator > fixed) accumulator = 0.0
+                state.renderAlpha = (accumulator / fixed).toFloat().coerceIn(0f, 1f)
                 state.tick++
                 frames++
             }
             if (now - periodStart > 1_000_000_000L) {
                 fps = frames
+                liveProbeCount = state.engine.probes.size
                 frames = 0
                 periodStart = now
             }
@@ -152,9 +177,12 @@ fun SandboxScreen(
         while (true) {
             delay(15_000)
             if (state.dirty) {
-                repo.saveAutosave(state.toScene())
-                state.dirty = false
-                saveIndicator = "自动保存"
+                val scene = state.toScene()
+                val result = withContext(Dispatchers.IO) { repo.saveAutosave(scene) }
+                if (result.isSuccess) {
+                    state.dirty = false
+                    saveIndicator = "自动保存"
+                }
             }
         }
     }
@@ -193,15 +221,20 @@ fun SandboxScreen(
             TopHud(
                 state = state,
                 fps = fps,
+                probeCount = liveProbeCount,
                 saveIndicator = saveIndicator,
                 onExit = onExit,
                 onSave = {
-                    repo.save(state.toScene())
-                        .onSuccess {
-                            state.dirty = false
-                            saveIndicator = "已保存"
-                        }
-                        .onFailure { state.toast("保存失败：${it.message}") }
+                    val scene = state.toScene()
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) { repo.save(scene) }
+                        result
+                            .onSuccess {
+                                state.dirty = false
+                                saveIndicator = "已保存"
+                            }
+                            .onFailure { state.toast("保存失败：${it.message}") }
+                    }
                 },
                 onOpenSavePanel = { showSavePanel = true },
                 onOpenSettings = {
@@ -267,14 +300,17 @@ fun SandboxScreen(
                     onClose = { showSavePanel = false },
                     onSave = { name ->
                         val scene = state.toScene().copy(name = name)
-                        repo.save(scene)
-                            .onSuccess {
-                                state.sceneName = name
-                                state.dirty = false
-                                saveIndicator = "已保存"
-                                state.toast("已保存：$name")
-                            }
-                            .onFailure { state.toast("保存失败：${it.message}") }
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { repo.save(scene) }
+                            result
+                                .onSuccess {
+                                    state.sceneName = name
+                                    state.dirty = false
+                                    saveIndicator = "已保存"
+                                    state.toast("已保存：$name")
+                                }
+                                .onFailure { state.toast("保存失败：${it.message}") }
+                        }
                     },
                     onExport = { exportLauncher.launch(repo.safeName(state.sceneName) + ".field.json") },
                     onImport = { importLauncher.launch(arrayOf("*/*")) },
@@ -329,6 +365,7 @@ private fun MiniButton(
 private fun TopHud(
     state: EditorState,
     fps: Int,
+    probeCount: Int,
     saveIndicator: String?,
     onExit: () -> Unit,
     onSave: () -> Unit,
@@ -336,8 +373,6 @@ private fun TopHud(
     onOpenSettings: () -> Unit,
     onOpenLaunch: () -> Unit,
 ) {
-    @Suppress("UNUSED_VARIABLE")
-    val tick = state.tick
     val sourceCount = state.sources.size
     val bodyCount = state.bodies.size
     LabPanel(Modifier.fillMaxWidth(), accent = true) {
@@ -353,7 +388,7 @@ private fun TopHud(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "场 $sourceCount · 球/块 $bodyCount · 探针 ${state.probeCount}",
+                        "场 $sourceCount · 球/块 $bodyCount · 探针 $probeCount",
                         color = TextSecondary,
                         fontSize = 9.sp,
                         maxLines = 1,
@@ -375,7 +410,7 @@ private fun TopHud(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 MiniButton("↶", { state.undo() }, enabled = state.canUndo)
                 MiniButton("↷", { state.redo() }, enabled = state.canRedo)
-                MiniButton("⌫", { state.clearProbes() }, enabled = state.probeCount > 0)
+                MiniButton("⌫", { state.clearProbes() }, enabled = probeCount > 0)
                 Spacer(Modifier.weight(1f))
                 Text("FPS $fps", color = TextSecondary, fontSize = 9.sp)
                 saveIndicator?.let {

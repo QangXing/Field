@@ -48,6 +48,9 @@ class Body(
 ) {
     var position: Vec2 = position
     var velocity: Vec2 = velocity
+
+    /** Position at the start of the most recent physics step, for render interpolation. */
+    var prevPosition: Vec2 = position
     var mass: Double = mass
     var charge: Double = charge
     var size: Double = size
