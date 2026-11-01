@@ -2,6 +2,7 @@ package dev.field.app.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,32 +15,30 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.field.app.data.SaveRepository
@@ -54,10 +53,7 @@ import dev.field.app.ui.components.LabIconButton
 import dev.field.app.ui.components.LabPanel
 import dev.field.app.ui.components.LabSlider
 import dev.field.app.ui.components.LabToggle
-import dev.field.app.ui.components.PanelWidth
 import dev.field.app.ui.components.SectionLabel
-import dev.field.app.ui.components.SlotSize
-import dev.field.app.ui.components.ToolbarHeight
 import dev.field.app.ui.theme.Accent
 import dev.field.app.ui.theme.AccentDark
 import dev.field.app.ui.theme.Bg
@@ -68,6 +64,7 @@ import dev.field.app.ui.theme.SurfaceRaised
 import dev.field.app.ui.theme.TextPrimary
 import dev.field.app.ui.theme.TextSecondary
 import dev.field.core.fields.DragRegion
+import dev.field.core.fields.FieldSource
 import dev.field.core.fields.ForceZone
 import dev.field.core.fields.GravityZone
 import dev.field.core.fields.Magnet
@@ -76,10 +73,11 @@ import dev.field.core.fields.PointCharge
 import dev.field.core.fields.WallSegment
 import dev.field.core.math.Vec2
 import dev.field.core.sim.Boundary
+import dev.field.core.sim.BodyShape
 import dev.field.core.sim.Integrator
 import dev.field.core.viz.HeatmapMode
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
@@ -110,8 +108,10 @@ fun SandboxScreen(
         if (uri != null) {
             repo.import(uri)
                 .onSuccess {
+                    val currentName = state.sceneName
                     state.loadScene(it)
-                    state.toast("已导入：${it.name}")
+                    if (it.name.isBlank()) state.sceneName = currentName
+                    state.toast("已导入：${state.sceneName}")
                 }
                 .onFailure { state.toast("导入失败：${it.message}") }
         }
@@ -173,75 +173,91 @@ fun SandboxScreen(
         }
     }
 
+    LaunchedEffect(state.selectedId, state.selectedBodyId) {
+        if (state.selectedId != null || state.selectedBodyId != null) {
+            showSettingsPanel = false
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(Bg)) {
         FieldCanvas(state, Modifier.fillMaxSize())
 
-        TopHud(
-            state = state,
-            fps = fps,
-            saveIndicator = saveIndicator,
-            onExit = onExit,
-            onSave = {
-                repo.save(state.toScene())
-                    .onSuccess {
-                        state.dirty = false
-                        saveIndicator = "已保存"
-                    }
-                    .onFailure { state.toast("保存失败：${it.message}") }
-            },
-            onOpenSavePanel = { showSavePanel = true },
-            onOpenSettings = { showSettingsPanel = !showSettingsPanel },
-            onOpenLaunch = { showLaunchPanel = true },
-            modifier = Modifier
+        Column(
+            Modifier
                 .align(Alignment.TopCenter)
+                .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(8.dp)
-                .fillMaxWidth(),
-        )
-
-        if (showSettingsPanel) {
-            SettingsPanel(
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            TopHud(
                 state = state,
-                onClose = { showSettingsPanel = false },
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .statusBarsPadding()
-                    .padding(top = 58.dp, bottom = 74.dp, end = 8.dp),
+                fps = fps,
+                saveIndicator = saveIndicator,
+                onExit = onExit,
+                onSave = {
+                    repo.save(state.toScene())
+                        .onSuccess {
+                            state.dirty = false
+                            saveIndicator = "已保存"
+                        }
+                        .onFailure { state.toast("保存失败：${it.message}") }
+                },
+                onOpenSavePanel = { showSavePanel = true },
+                onOpenSettings = {
+                    showSettingsPanel = !showSettingsPanel
+                    if (showSettingsPanel) state.select(null)
+                },
+                onOpenLaunch = { showLaunchPanel = true },
             )
-        } else {
-            state.selectedSource?.let { source ->
-                InspectorPanel(
-                    state = state,
-                    source = source,
-                    onClose = { state.select(null) },
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .statusBarsPadding()
-                        .padding(top = 58.dp, bottom = 74.dp, end = 8.dp),
-                )
+
+            state.toastMessage?.let { message ->
+                Box(
+                    Modifier
+                        .background(Surface)
+                        .border(1.dp, AccentDark)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(message, color = TextPrimary, fontSize = 11.sp)
+                }
             }
         }
 
-        BottomToolbar(
-            state = state,
-            modifier = Modifier
+        Column(
+            Modifier
                 .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(8.dp),
-        )
-
-        state.toastMessage?.let { message ->
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 64.dp)
-                    .background(Surface)
-                    .border(1.dp, AccentDark)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            ) {
-                Text(message, color = TextPrimary, fontSize = 12.sp)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (showSettingsPanel) {
+                SettingsSheet(
+                    state = state,
+                    onClose = { showSettingsPanel = false },
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                )
+            } else {
+                val source = state.selectedSource
+                val body = state.selectedBody
+                if (source != null) {
+                    SourceInspector(
+                        state = state,
+                        source = source,
+                        onClose = { state.select(null) },
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    )
+                } else if (body != null) {
+                    BodyInspector(
+                        state = state,
+                        onClose = { state.selectBody(null) },
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+                    )
+                }
             }
+
+            ContextBar(state)
+            BottomToolbar(state)
         }
 
         if (showSavePanel) {
@@ -278,6 +294,38 @@ fun SandboxScreen(
 }
 
 @Composable
+private fun MiniButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    width: Int = 32,
+) {
+    Box(
+        modifier
+            .width(width.dp)
+            .height(30.dp)
+            .background(if (selected) Accent else SurfaceRaised, RectangleShape)
+            .border(1.dp, if (selected) AccentDark else Border, RectangleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            color = when {
+                !enabled -> TextSecondary.copy(alpha = 0.4f)
+                selected -> Bg
+                else -> TextPrimary
+            },
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun TopHud(
     state: EditorState,
     fps: Int,
@@ -287,164 +335,134 @@ private fun TopHud(
     onOpenSavePanel: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenLaunch: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        LabPanel(Modifier, accent = true) {
-            Row(
-                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LabIconButton("≡", onExit)
-                Column {
-                    Text(state.sceneName, color = TextPrimary, fontSize = 13.sp)
+    @Suppress("UNUSED_VARIABLE")
+    val tick = state.tick
+    val sourceCount = state.sources.size
+    val bodyCount = state.bodies.size
+    LabPanel(Modifier.fillMaxWidth(), accent = true) {
+        Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                MiniButton("≡", onExit, width = 34)
+                Column(Modifier.weight(1f)) {
                     Text(
-                        "${state.sources.size} 个场源 · ${state.boundaryLabel()}",
+                        state.sceneName,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "场 $sourceCount · 球/块 $bodyCount · 探针 ${state.probeCount}",
                         color = TextSecondary,
                         fontSize = 9.sp,
+                        maxLines = 1,
                     )
                 }
-                Spacer(Modifier.width(4.dp))
-                LabIconButton(
-                    if (state.isRunning) "⏸" else "▶",
-                    onClick = { state.isRunning = !state.isRunning },
-                )
-                LabIconButton("−", onClick = { state.speedDown() })
+                MiniButton(if (state.isRunning) "Ⅱ" else "▶", {
+                    state.isRunning = !state.isRunning
+                }, selected = !state.isRunning)
+                MiniButton("−", { state.speedDown() })
                 Text(
                     "×${formatSpeed(state.settings.speed)}",
                     color = Accent,
-                    fontSize = 12.sp,
-                    modifier = Modifier.width(40.dp),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.width(28.dp),
                 )
-                LabIconButton("+", onClick = { state.speedUp() })
-                LabIconButton("↶", onClick = { state.undo() }, enabled = state.canUndo)
-                LabIconButton("↷", onClick = { state.redo() }, enabled = state.canRedo)
+                MiniButton("+", { state.speedUp() })
             }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        LabPanel(Modifier, accent = true) {
-            Row(
-                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                ProbeCounter(state)
-                Text("FPS $fps", color = TextSecondary, fontSize = 10.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                MiniButton("↶", { state.undo() }, enabled = state.canUndo)
+                MiniButton("↷", { state.redo() }, enabled = state.canRedo)
+                MiniButton("⌫", { state.clearProbes() }, enabled = state.probeCount > 0)
+                Spacer(Modifier.weight(1f))
+                Text("FPS $fps", color = TextSecondary, fontSize = 9.sp)
                 saveIndicator?.let {
-                    Text(it, color = Accent, fontSize = 10.sp)
+                    Text(it, color = Accent, fontSize = 9.sp)
                 }
-                LabIconButton("＋", onOpenLaunch)
-                LabIconButton("存", onSave)
-                LabIconButton("档", onOpenSavePanel)
-                LabIconButton("设", onOpenSettings, selected = false)
+                MiniButton("＋", onOpenLaunch)
+                MiniButton("存", onSave)
+                MiniButton("档", onOpenSavePanel)
+                MiniButton("设", onOpenSettings, selected = false)
             }
         }
     }
 }
 
 @Composable
-private fun ProbeCounter(state: EditorState) {
-    @Suppress("UNUSED_VARIABLE")
-    val tick = state.tick
-    Text(
-        "探针 ${state.engine.probes.size}",
-        color = TextSecondary,
-        fontSize = 10.sp,
-    )
-}
-
-@Composable
-private fun BottomToolbar(
-    state: EditorState,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        LabPanel(Modifier, accent = true) {
+private fun BottomToolbar(state: EditorState) {
+    LabPanel(Modifier.fillMaxWidth(), accent = true) {
+        Row(
+            Modifier.padding(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Row(
-                Modifier.padding(4.dp).horizontalScroll(rememberScrollState()),
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                EditorTool.entries.forEach { tool ->
+                ToolSlot(
+                    label = "选择",
+                    iconRes = EditorTool.SELECT.iconRes,
+                    selected = state.tool == null,
+                    onClick = {
+                        state.tool = null
+                        state.select(null)
+                        state.selectBody(null)
+                    },
+                )
+                EditorTool.placementSlots.filter { !it.isEraser }.forEach { tool ->
                     ToolSlot(
-                        state = state,
-                        tool = tool,
+                        label = tool.label,
+                        iconRes = tool.iconRes,
                         selected = state.tool == tool,
                         onClick = {
                             state.tool = if (state.tool == tool) null else tool
+                            state.select(null)
+                            state.selectBody(null)
                         },
                     )
                 }
             }
-        }
-
-        if (state.tool == EditorTool.ELECTRIC) {
-            LabPanel(Modifier, accent = true) {
-                Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("极性", color = TextSecondary, fontSize = 9.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Chip("＋", state.chargeSign >= 0.0, Modifier.clickable { state.chargeSign = 1.0 })
-                        Chip("－", state.chargeSign < 0.0, Modifier.clickable { state.chargeSign = -1.0 })
-                    }
-                }
-            }
-        }
-
-        if (state.tool?.rotatable == true) {
-            LabPanel(Modifier, accent = true) {
-                Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("旋转", color = TextSecondary, fontSize = 9.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        LabIconButton("↻", onClick = { state.rotate() })
-                        Chip("${state.rotationDeg}°", true, Modifier.clickable { state.resetRotation() })
-                    }
-                }
-            }
-        }
-        if (state.tool == null) {
-            LabPanel(Modifier, accent = true) {
-                Box(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                    Text("选择模式", color = TextSecondary, fontSize = 11.sp)
-                }
-            }
+            ToolSlot(
+                label = EditorTool.ERASE.label,
+                iconRes = EditorTool.ERASE.iconRes,
+                selected = state.tool == EditorTool.ERASE,
+                onClick = {
+                    state.tool = if (state.tool == EditorTool.ERASE) null else EditorTool.ERASE
+                    state.select(null)
+                    state.selectBody(null)
+                },
+            )
         }
     }
 }
 
 @Composable
 private fun ToolSlot(
-    state: EditorState,
-    tool: EditorTool,
+    label: String,
+    iconRes: Int,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
     Column(
         Modifier
-            .size(SlotSize + 8.dp)
+            .size(width = 48.dp, height = 52.dp)
             .background(if (selected) Accent.copy(alpha = 0.22f) else SurfaceRaised)
             .border(if (selected) 2.dp else 1.dp, if (selected) Accent else Border, RectangleShape)
             .clickable(onClick = onClick)
-            .padding(3.dp),
+            .padding(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        androidx.compose.foundation.Image(
-            painter = painterResource(tool.iconRes),
-            contentDescription = tool.label,
-            modifier = Modifier.size(26.dp),
+        Image(
+            painter = painterResource(iconRes),
+            contentDescription = label,
+            modifier = Modifier.size(24.dp),
         )
         Text(
-            tool.label,
+            label,
             color = if (selected) Accent else TextSecondary,
             fontSize = 8.sp,
             maxLines = 1,
@@ -453,21 +471,137 @@ private fun ToolSlot(
 }
 
 @Composable
-private fun InspectorPanel(
+private fun ContextBar(state: EditorState) {
+    val tool = state.tool
+    if (tool == null) {
+        LabPanel(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("选择模式", color = TextSecondary, fontSize = 10.sp)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "拖动中心移动 · 拖动边框缩放",
+                    color = TextSecondary.copy(alpha = 0.8f),
+                    fontSize = 9.sp,
+                )
+            }
+        }
+        return
+    }
+
+    LabPanel(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            when {
+                tool.isEraser -> Text("橡皮：点击或拖过即删除", color = TextSecondary, fontSize = 10.sp)
+                tool.isBody -> {
+                    Text("放置 ${tool.label}", color = TextSecondary, fontSize = 10.sp)
+                    Text(
+                        "质量 ${EditorState.format(state.bodyMass)} kg · 电荷 ${EditorState.format(state.bodyCharge, 2)} · ${EditorState.format(state.bodySize)} m",
+                        color = TextPrimary,
+                        fontSize = 9.sp,
+                    )
+                }
+
+                tool == EditorTool.ELECTRIC -> {
+                    Text("极性", color = TextSecondary, fontSize = 10.sp)
+                    Chip("＋", state.chargeSign >= 0.0, Modifier.clickable { state.chargeSign = 1.0 })
+                    Chip("－", state.chargeSign < 0.0, Modifier.clickable { state.chargeSign = -1.0 })
+                }
+
+                else -> Text("放置 ${tool.label}：点击落位 · 拖动连放", color = TextSecondary, fontSize = 10.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            if (tool.rotatable) {
+                Chip("${state.rotationDeg}°", true, Modifier.clickable { state.resetRotation() })
+                MiniButton("↻", { state.rotate() }, width = 30)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceInspector(
     state: EditorState,
-    source: dev.field.core.fields.FieldSource,
+    source: FieldSource,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LabPanel(modifier.width(PanelWidth), accent = true) {
+    val frame = state.sourceFrame(source)
+    LabPanel(modifier, accent = true) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(sourceTitle(source), color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text("#${source.id}", color = TextSecondary, fontSize = 9.sp)
+            Spacer(Modifier.width(8.dp))
+            MiniButton("✕", onClose, width = 28)
+        }
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionLabel(sourceTitle(source))
-            KeyValueRow("编号", "#${source.id}")
-            KeyValueRow("位置", state.sources.indexOf(source).let { "第 ${it + 1} 个" })
+            SectionLabel("场设置（拖动中心移动，拖动边框缩放）")
+            LabSlider(
+                "中心 X",
+                frame.center.x,
+                state.bounds.minX..state.bounds.maxX,
+                onValueChange = { value ->
+                    state.moveSourceTo(source.id, Vec2(state.snap(value), frame.center.y))
+                },
+                valueText = "${EditorState.format(frame.center.x)} m",
+            )
+            LabSlider(
+                "中心 Y",
+                frame.center.y,
+                state.bounds.minY..state.bounds.maxY,
+                onValueChange = { value ->
+                    state.moveSourceTo(source.id, Vec2(frame.center.x, state.snap(value)))
+                },
+                valueText = "${EditorState.format(frame.center.y)} m",
+            )
+            if (source !is WallSegment) {
+                if (frame.halfWidth == frame.halfHeight) {
+                    LabSlider(
+                        "边框大小",
+                        frame.width,
+                        0.5..20.0,
+                        onValueChange = { value ->
+                            state.resizeSource(source.id, value / 2.0, value / 2.0)
+                        },
+                        valueText = "${EditorState.format(frame.width)} m",
+                    )
+                } else {
+                    LabSlider(
+                        "边框宽",
+                        frame.width,
+                        1.0..20.0,
+                        onValueChange = { value ->
+                            state.resizeSource(source.id, value / 2.0, frame.halfHeight)
+                        },
+                        valueText = "${EditorState.format(frame.width)} m",
+                    )
+                    LabSlider(
+                        "边框高",
+                        frame.height,
+                        1.0..20.0,
+                        onValueChange = { value ->
+                            state.resizeSource(source.id, frame.halfWidth, value / 2.0)
+                        },
+                        valueText = "${EditorState.format(frame.height)} m",
+                    )
+                }
+            }
             DividerLine()
 
             when (source) {
                 is PointCharge -> {
+                    SectionLabel("电学参数")
                     LabSlider(
                         "电荷量", source.charge, -3.0..3.0,
                         onValueChange = { value ->
@@ -481,12 +615,13 @@ private fun InspectorPanel(
                         Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        LabButton("正电荷", { state.updateSelected { (it as PointCharge).copy(charge = 1.0) } })
-                        LabButton("负电荷", { state.updateSelected { (it as PointCharge).copy(charge = -1.0) } })
+                        LabButton("正电荷", { state.updateSelected { (it as PointCharge).copy(charge = 1.0) } }, modifier = Modifier.weight(1f))
+                        LabButton("负电荷", { state.updateSelected { (it as PointCharge).copy(charge = -1.0) } }, modifier = Modifier.weight(1f))
                     }
                 }
 
                 is Magnet -> {
+                    SectionLabel("磁学参数")
                     LabSlider(
                         "磁极强度", source.strength, 0.1..3.0,
                         onValueChange = { value ->
@@ -501,14 +636,15 @@ private fun InspectorPanel(
                             state.updateSelected {
                                 (it as Magnet).copy(angle = it.angle + Math.PI / 4.0)
                             }
-                        })
+                        }, modifier = Modifier.weight(1f))
                         LabButton("N 朝右", {
                             state.updateSelected { (it as Magnet).copy(angle = 0.0) }
-                        })
+                        }, modifier = Modifier.weight(1f))
                     }
                 }
 
                 is MassSource -> {
+                    SectionLabel("引力参数")
                     LabSlider(
                         "质量", source.mass, 1.0..30.0,
                         onValueChange = { value ->
@@ -521,6 +657,7 @@ private fun InspectorPanel(
                 }
 
                 is GravityZone -> {
+                    SectionLabel("重力参数")
                     LabSlider(
                         "重力大小", source.gravity.length, 0.0..10.0,
                         onValueChange = { value ->
@@ -537,15 +674,14 @@ private fun InspectorPanel(
                         onValueChange = { degrees ->
                             state.updateSelected {
                                 val zone = it as GravityZone
-                                val magnitude = maxOf(zone.gravity.length, 0.01)
-                                zone.copy(gravity = Vec2(1.0, 0.0).rotate(Math.toRadians(degrees)) * magnitude)
+                                zone.copy(gravity = Vec2(1.0, 0.0).rotate(Math.toRadians(degrees)) * abs(zone.gravity.length))
                             }
                         },
                     )
-                    ZoneSizeSlider(state)
                 }
 
                 is ForceZone -> {
+                    SectionLabel("力场参数")
                     LabSlider(
                         "加速度大小", source.accel.length, 0.0..10.0,
                         onValueChange = { value ->
@@ -563,28 +699,24 @@ private fun InspectorPanel(
                         onValueChange = { degrees ->
                             state.updateSelected {
                                 val zone = it as ForceZone
-                                zone.copy(accel = Vec2(1.0, 0.0).rotate(Math.toRadians(degrees)) * maxOf(zone.accel.length, 0.01))
+                                zone.copy(accel = Vec2(1.0, 0.0).rotate(Math.toRadians(degrees)) * abs(zone.accel.length))
                             }
                         },
                     )
-                    ZoneSizeSlider(state)
                 }
 
                 is DragRegion -> {
+                    SectionLabel("阻力参数")
                     LabSlider(
                         "线性阻力", source.linear, 0.0..3.0,
                         onValueChange = { value ->
-                            state.updateSelected { current ->
-                                (current as DragRegion).copy(linear = value)
-                            }
+                            state.updateSelected { (it as DragRegion).copy(linear = value) }
                         },
                     )
                     LabSlider(
                         "二次阻力", source.quadratic, 0.0..1.5,
                         onValueChange = { value ->
-                            state.updateSelected { current ->
-                                (current as DragRegion).copy(quadratic = value)
-                            }
+                            state.updateSelected { (it as DragRegion).copy(quadratic = value) }
                         },
                     )
                     LabSlider(
@@ -603,10 +735,10 @@ private fun InspectorPanel(
                             }
                         },
                     )
-                    ZoneSizeSlider(state)
                 }
 
                 is WallSegment -> {
+                    SectionLabel("墙体参数")
                     LabSlider(
                         "墙长", (source.end - source.start).length, 1.0..20.0,
                         onValueChange = { length ->
@@ -616,7 +748,10 @@ private fun InspectorPanel(
                                     if (it.lengthSquared == 0.0) Vec2(1.0, 0.0) else it
                                 }
                                 val center = (wall.start + wall.end) * 0.5
-                                wall.copy(start = center - dir * (length / 2.0), end = center + dir * (length / 2.0))
+                                wall.copy(
+                                    start = center - dir * (length / 2.0),
+                                    end = center + dir * (length / 2.0),
+                                )
                             }
                         },
                     )
@@ -628,59 +763,108 @@ private fun InspectorPanel(
                                 val length = (wall.end - wall.start).length.coerceAtLeast(1.0)
                                 val center = (wall.start + wall.end) * 0.5
                                 val dir = Vec2(1.0, 0.0).rotate(Math.toRadians(degrees))
-                                wall.copy(start = center - dir * (length / 2.0), end = center + dir * (length / 2.0))
+                                wall.copy(
+                                    start = center - dir * (length / 2.0),
+                                    end = center + dir * (length / 2.0),
+                                )
                             }
                         },
                     )
                     LabSlider(
                         "厚度", source.thickness, 0.1..1.0,
                         onValueChange = { value ->
-                            state.updateSelected { current ->
-                                (current as WallSegment).copy(thickness = value)
-                            }
+                            state.updateSelected { (it as WallSegment).copy(thickness = value) }
                         },
                     )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LabButton("删除", {
-                    state.removeSource(source.id)
-                }, accent = false, danger = true, modifier = Modifier.weight(1f))
-                LabButton("关闭", {
-                    onClose()
-                }, accent = true, modifier = Modifier.weight(1f))
+                LabButton("删除", { state.removeSource(source.id) }, danger = true, modifier = Modifier.weight(1f))
+                LabButton("关闭", onClose, modifier = Modifier.weight(1f))
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
 
 @Composable
-private fun ZoneSizeSlider(state: EditorState) {
-    val source = state.selectedSource ?: return
-    val side = EditorState.zoneSide(source) ?: return
-    LabSlider(
-        "区域边长", side, 1.0..20.0,
-        onValueChange = { value ->
-            state.updateSelected { current ->
-                val center = EditorState.zoneCenter(current) ?: return@updateSelected current
-                val half = value / 2.0
-                val min = Vec2(center.x - half, center.y - half)
-                val max = Vec2(center.x + half, center.y + half)
-                when (current) {
-                    is GravityZone -> current.copy(min = min, max = max)
-                    is ForceZone -> current.copy(min = min, max = max)
-                    is DragRegion -> current.copy(min = min, max = max)
-                    else -> current
-                }
+private fun BodyInspector(
+    state: EditorState,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val body = state.selectedBody ?: return
+    LabPanel(modifier, accent = true) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (body.shape == BodyShape.CIRCLE) "运动小球" else "运动方块",
+                color = Accent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.weight(1f))
+            Text("#${body.id}", color = TextSecondary, fontSize = 9.sp)
+            Spacer(Modifier.width(8.dp))
+            MiniButton("✕", onClose, width = 28)
+        }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            SectionLabel("物体参数（拖动中心位置移动）")
+            KeyValueRow("重心", "(${EditorState.format(body.position.x)}, ${EditorState.format(body.position.y)}) m")
+            KeyValueRow("速度", "${EditorState.format(body.velocity.length, 2)} m/s")
+            DividerLine()
+            LabSlider(
+                "质量", body.mass, 0.1..20.0,
+                onValueChange = { value -> state.updateSelectedBody { it.mass = roundTenth(value) } },
+                valueText = "${EditorState.format(body.mass, 2)} kg",
+            )
+            LabSlider(
+                "带电量", body.charge, -5.0..5.0,
+                onValueChange = { value -> state.updateSelectedBody { it.charge = value } },
+                valueText = "${EditorState.format(body.charge, 2)} C",
+            )
+            LabSlider(
+                "尺寸", body.size, 0.1..3.0,
+                onValueChange = { value -> state.updateSelectedBody { it.size = roundTenth(value) } },
+                valueText = "${EditorState.format(body.size)} m",
+            )
+            LabSlider(
+                "速度 X", body.velocity.x, -20.0..20.0,
+                onValueChange = { value ->
+                    state.updateSelectedBody { it.velocity = Vec2(value, it.velocity.y) }
+                },
+                valueText = "${EditorState.format(body.velocity.x, 2)} m/s",
+            )
+            LabSlider(
+                "速度 Y", body.velocity.y, -20.0..20.0,
+                onValueChange = { value ->
+                    state.updateSelectedBody { it.velocity = Vec2(it.velocity.x, value) }
+                },
+                valueText = "${EditorState.format(body.velocity.y, 2)} m/s",
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                LabButton("静止", {
+                    state.updateSelectedBody { it.velocity = Vec2.ZERO }
+                }, modifier = Modifier.weight(1f))
+                LabButton("删除", {
+                    state.removeBody(body.id)
+                }, danger = true, modifier = Modifier.weight(1f))
+                LabButton("关闭", onClose, modifier = Modifier.weight(1f))
             }
-        },
-    )
+            Spacer(Modifier.height(6.dp))
+        }
+    }
 }
 
 @Composable
@@ -693,16 +877,27 @@ private fun AngleSlider(value: Double, onValueChange: (Double) -> Unit) {
 }
 
 @Composable
-private fun SettingsPanel(
+private fun SettingsSheet(
     state: EditorState,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LabPanel(modifier.width(PanelWidth), accent = true) {
+    LabPanel(modifier, accent = true) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("世界设置", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            MiniButton("✕", onClose, width = 28)
+        }
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionLabel("世界设置")
+            SectionLabel("边界与物理")
             Text("边界", color = TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp))
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Boundary.entries.forEach { boundary ->
                     val label = when (boundary) {
                         Boundary.REFLECT -> "反射"
@@ -714,28 +909,28 @@ private fun SettingsPanel(
                     })
                 }
             }
-
-            DividerLine()
-            SectionLabel("物理")
-            Text("积分器", color = TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp))
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Chip("半隐式", state.settings.integrator == Integrator.SEMI_IMPLICIT, Modifier.clickable {
                     state.updateSettings { it.copy(integrator = Integrator.SEMI_IMPLICIT) }
                 })
                 Chip("RK4", state.settings.integrator == Integrator.RK4, Modifier.clickable {
                     state.updateSettings { it.copy(integrator = Integrator.RK4) }
                 })
+                Chip("子步 ${state.settings.subSteps}", true, Modifier.clickable {
+                    state.updateSettings { it.copy(subSteps = if (it.subSteps >= 4) 1 else it.subSteps + 1) }
+                })
+                Chip("碰撞", state.settings.collisions, Modifier.clickable {
+                    state.updateSettings { it.copy(collisions = !it.collisions) }
+                })
             }
-            KeyValueRow("子步", state.settings.subSteps.toString())
-            Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LabButton("−", { state.updateSettings { it.copy(subSteps = (it.subSteps - 1).coerceIn(1, 4)) } })
-                LabButton("＋", { state.updateSettings { it.copy(subSteps = (it.subSteps + 1).coerceIn(1, 4)) } })
-            }
-            LabToggle("探针碰撞", state.settings.collisions, { value ->
-                state.updateSettings { it.copy(collisions = value) }
-            })
-            Text("网格吸附", color = TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
-            Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("吸附", color = TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
                 listOf(0.0 to "关", 0.5 to "0.5 m", 1.0 to "1 m").forEach { (step, label) ->
                     Chip(label, state.settings.gridSnap == step, Modifier.clickable {
                         state.updateSettings { it.copy(gridSnap = step) }
@@ -744,20 +939,72 @@ private fun SettingsPanel(
             }
 
             DividerLine()
-            SectionLabel("可视化")
-            LabToggle("矢量箭头", state.visuals.arrows, { value ->
-                state.updateVisuals { it.copy(arrows = value) }
+            SectionLabel("世界规则")
+            RuleToggle("万有引力", state.rules.gravityEnabled) { value ->
+                state.updateRules { it.copy(gravityEnabled = value) }
+            }
+            RuleToggle("带电体电荷传递", state.rules.chargeTransfer) { value ->
+                state.updateRules { it.copy(chargeTransfer = value) }
+            }
+            RuleToggle("无视反弹", state.rules.ignoreBounce) { value ->
+                state.updateRules { it.copy(ignoreBounce = value) }
+            }
+            RuleToggle("带电体漏电", state.rules.chargeLeak) { value ->
+                state.updateRules { it.copy(chargeLeak = value) }
+            }
+            RuleToggle("粒子轨迹预测", state.rules.trajectoryPrediction) { value ->
+                state.updateRules { it.copy(trajectoryPrediction = value) }
+            }
+            RuleToggle("粒子受力及力矩显示", state.rules.forceTorqueDisplay) { value ->
+                state.updateRules { it.copy(forceTorqueDisplay = value) }
+            }
+            RuleToggle("带电体间库仑力", state.rules.chargeForceEnabled) { value ->
+                state.updateRules { it.copy(chargeForceEnabled = value) }
+            }
+            RuleToggle("带电体受力显示", state.rules.chargeForceDisplay) { value ->
+                state.updateRules { it.copy(chargeForceDisplay = value) }
+            }
+            RuleToggle("电流方向显示", state.rules.currentDirection) { value ->
+                state.updateRules { it.copy(currentDirection = value) }
+            }
+            RuleToggle("粒子撞到物体后消散", state.rules.despawnOnImpact) { value ->
+                state.updateRules { it.copy(despawnOnImpact = value) }
+            }
+            RuleToggle("粒子存活寿命", state.rules.particleLifetime) { value ->
+                state.updateRules { it.copy(particleLifetime = value) }
+            }
+            RuleToggle("粒子运动轨迹线", state.rules.trails) { value ->
+                state.updateRules { it.copy(trails = value) }
+            }
+            RuleToggle("场的箭头显示", state.rules.fieldArrows) { value ->
+                state.updateRules { it.copy(fieldArrows = value) }
+            }
+            RuleToggle("重心显示", state.rules.centerOfGravity) { value ->
+                state.updateRules { it.copy(centerOfGravity = value) }
+            }
+
+            DividerLine()
+            SectionLabel("显示设置")
+            LabToggle("隐藏默认案例", state.display.hideDefaults, onChange = { value ->
+                state.updateDisplay { it.copy(hideDefaults = value) }
             })
-            LabToggle("场线", state.visuals.streamlines, { value ->
+            LabToggle("关闭滑动改变摄像机参数", state.display.lockCamera, onChange = { value ->
+                state.updateDisplay { it.copy(lockCamera = value) }
+            })
+
+            DividerLine()
+            SectionLabel("可视化")
+            LabToggle("矢量箭头", state.visuals.arrows && state.rules.fieldArrows, onChange = { value ->
+                state.updateVisuals { it.copy(arrows = value) }
+                state.updateRules { it.copy(fieldArrows = value) }
+            })
+            LabToggle("场线", state.visuals.streamlines, onChange = { value ->
                 state.updateVisuals { it.copy(streamlines = value) }
             })
-            LabToggle("热图", state.visuals.heatmap, { value ->
+            LabToggle("热图", state.visuals.heatmap, onChange = { value ->
                 state.updateVisuals { it.copy(heatmap = value) }
             })
-            LabToggle("探针拖尾", state.visuals.trails, { value ->
-                state.updateVisuals { it.copy(trails = value) }
-            })
-            Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Chip("势能", state.visuals.heatmapMode == HeatmapMode.POTENTIAL, Modifier.clickable {
                     state.updateVisuals { it.copy(heatmapMode = HeatmapMode.POTENTIAL) }
                 })
@@ -765,19 +1012,20 @@ private fun SettingsPanel(
                     state.updateVisuals { it.copy(heatmapMode = HeatmapMode.MAGNITUDE) }
                 })
             }
-
-            DividerLine()
-            SectionLabel("操作")
-            Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 LabButton("清空探针", { state.clearProbes() }, modifier = Modifier.weight(1f))
+                LabButton("清空物体", { state.clearBodies() }, modifier = Modifier.weight(1f))
             }
-            Spacer(Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
-                LabButton("关闭面板", onClose, accent = true, modifier = Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+@Composable
+private fun RuleToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    LabToggle(label, checked, onChange)
 }
 
 @Composable
@@ -789,27 +1037,40 @@ private fun SavePanelContent(
     onImport: () -> Unit,
 ) {
     var name by remember { mutableStateOf(state.sceneName) }
-    Column(Modifier.width(320.dp).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        Modifier.fillMaxWidth().padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         SectionLabel("存档内操作")
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("世界名称") },
-            singleLine = true,
-            colors = TextFieldDefaults.colors(
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary,
-                focusedContainerColor = SurfaceRaised,
-                unfocusedContainerColor = SurfaceRaised,
-                focusedIndicatorColor = Accent,
-                unfocusedIndicatorColor = Border,
-                focusedLabelColor = Accent,
-                unfocusedLabelColor = TextSecondary,
-            ),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Chip("名称", true)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(34.dp)
+                    .background(SurfaceRaised)
+                    .border(1.dp, Border)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                    ),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
         LabButton("保存", { onSave(name) }, accent = true, modifier = Modifier.fillMaxWidth())
-        LabButton("导出 JSON", onExport, modifier = Modifier.fillMaxWidth())
-        LabButton("导入 JSON", onImport, modifier = Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LabButton("导出 JSON", onExport, modifier = Modifier.weight(1f))
+            LabButton("导入 JSON", onImport, modifier = Modifier.weight(1f))
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LabButton("清空探针", { state.clearProbes() }, modifier = Modifier.weight(1f))
             LabButton("关闭", onClose, modifier = Modifier.weight(1f))
@@ -819,35 +1080,60 @@ private fun SavePanelContent(
 
 @Composable
 private fun LaunchPanel(state: EditorState, onClose: () -> Unit) {
-    var count by remember { mutableStateOf(20.0) }
-    var speed by remember { mutableStateOf(8.0) }
-    var charge by remember { mutableStateOf(1.0) }
-    var spread by remember { mutableStateOf(20.0) }
+    var probeCount by remember { mutableStateOf(12.0) }
+    var probeSpeed by remember { mutableStateOf(8.0) }
+    var probeCharge by remember { mutableStateOf(1.0) }
+    var probeSpread by remember { mutableStateOf(20.0) }
+    var bodyCount by remember { mutableStateOf(4.0) }
+    var bodyMass by remember { mutableStateOf(1.5) }
+    var bodyCharge by remember { mutableStateOf(0.0) }
+    var bodySpeed by remember { mutableStateOf(6.0) }
+    var bodySize by remember { mutableStateOf(0.6) }
+    var bodySpread by remember { mutableStateOf(20.0) }
+    var shape by remember { mutableStateOf(BodyShape.CIRCLE) }
 
-    Column(Modifier.width(320.dp).padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(10.dp)) {
         SectionLabel("发射探针")
-        LabSlider("数量", count, 1.0..200.0, { count = it.roundToInt().toDouble() }, valueText = count.roundToInt().toString())
-        LabSlider("初速度", speed, 0.0..30.0, { speed = it }, valueText = "%.1f m/s".format(speed))
-        LabSlider("电荷", charge, -3.0..3.0, { charge = it }, valueText = "%.2f".format(charge))
-        LabSlider("散布角", spread, 0.0..180.0, { spread = it }, valueText = "${spread.roundToInt()}°")
-        Text(
-            "探针从世界中心向右发射，方向可在检查器中调整。",
-            color = TextSecondary,
-            fontSize = 10.sp,
-            modifier = Modifier.padding(horizontal = 10.dp),
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LabSlider("数量", probeCount, 1.0..200.0, { probeCount = it.roundToInt().toDouble() }, valueText = probeCount.roundToInt().toString())
+        LabSlider("初速度", probeSpeed, 0.0..30.0, { probeSpeed = it }, valueText = "%.1f m/s".format(probeSpeed))
+        LabSlider("电荷", probeCharge, -3.0..3.0, { probeCharge = it }, valueText = "%.2f".format(probeCharge))
+        LabSlider("散布角", probeSpread, 0.0..180.0, { probeSpread = it }, valueText = "${probeSpread.roundToInt()}°")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             LabButton("发射", {
-                state.launchProbes(
-                    count = count.roundToInt(),
-                    speed = speed,
-                    charge = charge,
-                    spreadDegrees = spread,
-                )
-                state.toast("已发射 ${count.roundToInt()} 个探针")
-                onClose()
+                state.launchProbes(probeCount.roundToInt(), probeSpeed, probeCharge, probeSpread)
+                state.toast("已发射 ${probeCount.roundToInt()} 个探针")
             }, accent = true, modifier = Modifier.weight(1f))
             LabButton("清空", { state.clearProbes() }, modifier = Modifier.weight(1f))
+        }
+
+        DividerLine()
+        SectionLabel("发射运动物体")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
+            Chip("小球", shape == BodyShape.CIRCLE, Modifier.clickable { shape = BodyShape.CIRCLE })
+            Chip("方块", shape == BodyShape.BOX, Modifier.clickable { shape = BodyShape.BOX })
+            Spacer(Modifier.weight(1f))
+            Text("从世界中心向右发射", color = TextSecondary, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        LabSlider("数量", bodyCount, 1.0..40.0, { bodyCount = it.roundToInt().toDouble() }, valueText = bodyCount.roundToInt().toString())
+        LabSlider("质量", bodyMass, 0.1..20.0, { bodyMass = it }, valueText = "%.2f kg".format(bodyMass))
+        LabSlider("带电量", bodyCharge, -5.0..5.0, { bodyCharge = it }, valueText = "%.2f C".format(bodyCharge))
+        LabSlider("初速度", bodySpeed, 0.0..30.0, { bodySpeed = it }, valueText = "%.1f m/s".format(bodySpeed))
+        LabSlider("尺寸", bodySize, 0.1..3.0, { bodySize = it }, valueText = "%.1f m".format(bodySize))
+        LabSlider("散布角", bodySpread, 0.0..180.0, { bodySpread = it }, valueText = "${bodySpread.roundToInt()}°")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LabButton("发射物体", {
+                state.launchBodies(
+                    count = bodyCount.roundToInt(),
+                    shape = shape,
+                    mass = bodyMass,
+                    charge = bodyCharge,
+                    speed = bodySpeed,
+                    size = bodySize,
+                    spreadDegrees = bodySpread,
+                )
+                state.toast("已发射 ${bodyCount.roundToInt()} 个物体")
+            }, accent = true, modifier = Modifier.weight(1f))
+            LabButton("清空物体", { state.clearBodies() }, modifier = Modifier.weight(1f))
             LabButton("关闭", onClose, modifier = Modifier.weight(1f))
         }
     }
@@ -862,24 +1148,20 @@ private fun ModalPanel(onDismiss: () -> Unit, content: @Composable () -> Unit) {
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.clickable {}) {
-            LabPanel(accent = true) {
-                content()
+        Box(Modifier.clickable { }) {
+            LabPanel(accent = true, modifier = Modifier.padding(12.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    content()
+                }
             }
         }
     }
 }
 
-private fun EditorState.boundaryLabel(): String = when (boundary) {
-    Boundary.REFLECT -> "反射边界"
-    Boundary.WRAP -> "环绕边界"
-    Boundary.OPEN -> "飞出边界"
-}
-
 private fun formatSpeed(speed: Double): String =
     if (speed < 1.0) speed.toString() else speed.toInt().toString()
 
-private fun sourceTitle(source: dev.field.core.fields.FieldSource): String = when (source) {
+private fun sourceTitle(source: FieldSource): String = when (source) {
     is PointCharge -> if (source.charge >= 0.0) "正电荷" else "负电荷"
     is Magnet -> "磁体（双磁极）"
     is MassSource -> "质量体"

@@ -17,15 +17,21 @@ import dev.field.core.fields.WallSegment
 import dev.field.core.math.Aabb
 import dev.field.core.math.Vec2
 import dev.field.core.scene.CameraDef
+import dev.field.core.scene.DisplaySettings
 import dev.field.core.scene.Scene
 import dev.field.core.scene.VisualDef
 import dev.field.core.scene.WorldDef
+import dev.field.core.sim.Body
+import dev.field.core.sim.BodyDef
+import dev.field.core.sim.BodyShape
 import dev.field.core.sim.Probe
 import dev.field.core.sim.ProbeDef
 import dev.field.core.sim.SimSettings
 import dev.field.core.sim.SimulationEngine
+import dev.field.core.sim.WorldRules
 import dev.field.core.viz.HeatmapMode
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
@@ -34,10 +40,19 @@ import kotlin.math.round
 import kotlin.math.sqrt
 import kotlin.random.Random
 
+/** Geometry of a field frame: centre plus half extents, used for drag handles. */
+data class SourceFrame(
+    val center: Vec2,
+    val halfWidth: Double,
+    val halfHeight: Double,
+) {
+    val width: Double get() = halfWidth * 2.0
+    val height: Double get() = halfHeight * 2.0
+}
+
 /**
- * Single source of truth for one sandbox session: world, sources, probes, camera,
- * placement tool state and undo history. Mutations that affect the field rebuild the
- * [SimulationEngine] while preserving live probes.
+ * Single source of truth for one sandbox session: world, sources, moving bodies,
+ * probes, camera, placement tool state, rules and undo history.
  */
 class EditorState(initial: Scene = Defaults.demoScene()) {
 
@@ -47,10 +62,13 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     var globalGravity by mutableStateOf(initial.world.gravity)
     var settings by mutableStateOf(initial.settings)
     var visuals by mutableStateOf(initial.visuals)
+    var rules by mutableStateOf(initial.rules)
+    var display by mutableStateOf(initial.display)
     var cameraCenter by mutableStateOf(initial.camera.center)
     var zoom by mutableStateOf(initial.camera.zoom)
 
     var selectedId by mutableStateOf<Long?>(null)
+    var selectedBodyId by mutableStateOf<Long?>(null)
     var tool by mutableStateOf<EditorTool?>(null)
     var chargeSign by mutableStateOf(1.0)
     var rotationDeg by mutableStateOf(0)
@@ -60,11 +78,20 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     var toastMessage by mutableStateOf<String?>(null)
     var toastToken by mutableStateOf(0)
 
+    /** Defaults used when placing a moving body. */
+    var bodyMass by mutableStateOf(1.5)
+    var bodyCharge by mutableStateOf(0.0)
+    var bodySize by mutableStateOf(0.6)
+    var bodySpeed by mutableStateOf(0.0)
+    var launchShape by mutableStateOf(BodyShape.CIRCLE)
+
     val sources = mutableStateListOf<FieldSource>()
+    val bodies = mutableStateListOf<Body>()
 
     var engine: SimulationEngine
 
     private var nextSourceId = 1L
+    private var nextBodyId = 1L
     private val undoStack = ArrayDeque<List<FieldSource>>()
     private val redoStack = ArrayDeque<List<FieldSource>>()
     var canUndo by mutableStateOf(false)
@@ -75,26 +102,29 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     init {
         sources.addAll(initial.sources)
         nextSourceId = (initial.sources.maxOfOrNull { it.id } ?: 0L) + 1L
-        engine = SimulationEngine(
-            field = FieldModel(sources.toList(), initial.world.gravity),
-            bounds = initial.world.bounds,
-            boundary = initial.world.boundary,
-            settings = initial.settings,
-            probes = initial.probes.mapTo(ArrayList()) {
-                Probe(
+        bodies.addAll(
+            initial.bodies.map {
+                Body(
                     id = it.id,
                     position = it.position,
                     velocity = it.velocity,
                     mass = it.mass,
                     charge = it.charge,
-                    radius = it.radius,
+                    shape = it.shape,
+                    size = it.size,
+                    angle = it.angle,
                 )
             },
         )
+        nextBodyId = (initial.bodies.maxOfOrNull { it.id } ?: 0L) + 1L
+        engine = buildEngine(initial.probes.mapTo(ArrayList()) { def -> probeFrom(def) })
     }
 
     val selectedSource: FieldSource?
         get() = selectedId?.let { id -> sources.firstOrNull { it.id == id } }
+
+    val selectedBody: Body?
+        get() = selectedBodyId?.let { id -> bodies.firstOrNull { it.id == id } }
 
     val probeCount: Int get() = engine.probes.size
 
@@ -107,16 +137,28 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         dirty = true
     }
 
+    private fun probeFrom(def: ProbeDef): Probe = Probe(
+        id = def.id,
+        position = def.position,
+        velocity = def.velocity,
+        mass = def.mass,
+        charge = def.charge,
+        radius = def.radius,
+    )
+
+    private fun buildEngine(probeList: MutableList<Probe>): SimulationEngine = SimulationEngine(
+        field = FieldModel(sources.toList(), globalGravity, gravityEnabled = rules.gravityEnabled),
+        bounds = bounds,
+        boundary = boundary,
+        settings = settings,
+        probes = probeList,
+        bodies = bodies,
+        rules = rules,
+    )
+
     private fun rebuildEngine() {
         val previous = engine
-        val probes = previous.probes.toMutableList()
-        engine = SimulationEngine(
-            field = FieldModel(sources.toList(), globalGravity),
-            bounds = bounds,
-            boundary = boundary,
-            settings = settings,
-            probes = probes,
-        )
+        engine = buildEngine(previous.probes)
         engine.time = previous.time
         tick++
     }
@@ -137,7 +179,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         rotation: Int = rotationDeg,
         sign: Double = chargeSign,
     ): FieldSource? {
-        if (tool.isEraser) return null
+        if (tool.isEraser || tool.isBody) return null
         val p = snap(rawPosition)
         val angle = Math.toRadians(rotation.toDouble())
         val id = nextSourceId++
@@ -178,8 +220,24 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
                 )
             }
 
-            EditorTool.ERASE -> null
+            EditorTool.BALL, EditorTool.BLOCK, EditorTool.ERASE, EditorTool.SELECT -> null
         }
+    }
+
+    fun makeBody(tool: EditorTool, rawPosition: Vec2): Body? {
+        if (!tool.isBody) return null
+        val p = snap(rawPosition)
+        val shape = if (tool == EditorTool.BLOCK) BodyShape.BOX else BodyShape.CIRCLE
+        return Body(
+            id = nextBodyId++,
+            position = p,
+            velocity = Vec2(bodySpeed, 0.0).rotate(Math.toRadians(rotationDeg.toDouble())),
+            mass = bodyMass,
+            charge = bodyCharge,
+            shape = shape,
+            size = bodySize,
+            angle = Math.toRadians(rotationDeg.toDouble()),
+        )
     }
 
     /** Returns null when [source] may be placed, otherwise a user-facing reason. */
@@ -224,6 +282,20 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         return null
     }
 
+    fun validateBody(body: Body): String? {
+        if (bodies.size >= MAX_BODIES) return "已达到物体上限（$MAX_BODIES）"
+        val margin = 0.2
+        val p = body.position
+        if (p.x < bounds.minX + margin || p.x > bounds.maxX - margin ||
+            p.y < bounds.minY + margin || p.y > bounds.maxY - margin
+        ) {
+            return "超出世界边界"
+        }
+        if (body.mass <= 0.0) return "质量必须为正"
+        if (body.size < 0.1 || body.size > 5.0) return "尺寸必须在 0.1..5 m"
+        return null
+    }
+
     private fun validateZone(min: Vec2, max: Vec2, inside: (Vec2) -> Boolean): String? {
         if (!inside(min) || !inside(max)) return "超出世界边界"
         val w = max.x - min.x
@@ -235,6 +307,19 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     fun placeAt(rawPosition: Vec2): Boolean {
         val active = tool ?: return false
         if (active.isEraser) return false
+        if (active.isBody) {
+            val candidate = makeBody(active, rawPosition) ?: return false
+            val reason = validateBody(candidate)
+            if (reason != null) {
+                toast(reason)
+                return false
+            }
+            bodies.add(candidate)
+            selectedBodyId = candidate.id
+            selectedId = null
+            markDirty()
+            return true
+        }
         val candidate = makeSource(active, rawPosition) ?: return false
         val reason = validate(candidate)
         if (reason != null) {
@@ -244,13 +329,14 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         pushUndo()
         sources.add(candidate)
         selectedId = candidate.id
+        selectedBodyId = null
         rebuildEngine()
         markDirty()
         return true
     }
 
     fun placementSpacing(tool: EditorTool): Double = when {
-        tool.pointLike -> 1.0
+        tool.pointLike || tool.isBody -> 1.0
         tool == EditorTool.WALL -> WALL_HALF_LENGTH * 2 + 0.5
         else -> ZONE_HALF * 2 + 0.5
     }
@@ -281,7 +367,22 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     fun placeLine(from: Vec2, to: Vec2): Int {
         val active = tool ?: return 0
         if (active.isEraser) return 0
-        val candidates = linePositions(from, to).mapNotNull { makeSource(active, it) }
+        val positions = linePositions(from, to)
+        if (active.isBody) {
+            val candidates = positions.mapNotNull { makeBody(active, it) }
+            val valid = candidates.filter { validateBody(it) == null }
+            if (valid.isEmpty()) {
+                toast(candidates.firstOrNull()?.let { validateBody(it) } ?: "无法放置")
+                return 0
+            }
+            bodies.addAll(valid)
+            selectedBodyId = valid.last().id
+            selectedId = null
+            markDirty()
+            if (valid.size > 1) toast("已放置 ${valid.size} 个物体")
+            return valid.size
+        }
+        val candidates = positions.mapNotNull { makeSource(active, it) }
         if (candidates.isEmpty()) return 0
         val valid = candidates.filter { validate(it) == null }
         if (valid.isEmpty()) {
@@ -291,6 +392,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         pushUndo()
         sources.addAll(valid)
         selectedId = valid.last().id
+        selectedBodyId = null
         rebuildEngine()
         markDirty()
         if (valid.size > 1) toast("已放置 ${valid.size} 个场单元")
@@ -298,6 +400,13 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     }
 
     fun eraseAt(point: Vec2, recordUndo: Boolean = true): Int {
+        val body = hitTestBody(point)
+        if (body != null) {
+            bodies.removeAll { it.id == body.id }
+            if (selectedBodyId == body.id) selectedBodyId = null
+            markDirty()
+            return 1
+        }
         val hit = hitTest(point) ?: return 0
         if (recordUndo) pushUndo()
         sources.removeAll { it.id == hit.id }
@@ -316,8 +425,28 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         markDirty()
     }
 
+    fun removeBody(id: Long) {
+        bodies.removeAll { it.id == id }
+        if (selectedBodyId == id) selectedBodyId = null
+        tick++
+        markDirty()
+    }
+
     fun select(id: Long?) {
         selectedId = id
+        if (id != null) selectedBodyId = null
+    }
+
+    fun selectBody(id: Long?) {
+        selectedBodyId = id
+        if (id != null) selectedId = null
+    }
+
+    fun hitTestBody(point: Vec2): Body? {
+        val padding = max(0.15, 14.0 / zoom)
+        return bodies.lastOrNull { body ->
+            (body.position - point).length <= body.collisionRadius + padding
+        }
     }
 
     fun hitTest(point: Vec2): FieldSource? {
@@ -371,6 +500,13 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         markDirty()
     }
 
+    fun moveBodyBy(id: Long, delta: Vec2) {
+        val body = bodies.firstOrNull { it.id == id } ?: return
+        body.position = body.position + delta
+        tick++
+        markDirty()
+    }
+
     fun updateSource(updated: FieldSource) {
         val index = sources.indexOfFirst { it.id == updated.id }
         if (index < 0) return
@@ -382,6 +518,75 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     fun updateSelected(transform: (FieldSource) -> FieldSource) {
         val current = selectedSource ?: return
         updateSource(transform(current))
+    }
+
+    fun updateSelectedBody(transform: (Body) -> Unit) {
+        selectedBody?.let {
+            transform(it)
+            markDirty()
+            tick++
+        }
+    }
+
+    // ---------------------------------------------------------------- frames
+
+    fun sourceFrame(source: FieldSource): SourceFrame = when (source) {
+        is PointCharge -> SourceFrame(source.position, source.extent, source.extent)
+        is Magnet -> SourceFrame(source.position, source.extent, source.extent)
+        is MassSource -> SourceFrame(source.position, source.extent, source.extent)
+        is GravityZone -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
+        is ForceZone -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
+        is DragRegion -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
+        is WallSegment -> {
+            val length = (source.end - source.start).length
+            SourceFrame((source.start + source.end) * 0.5, length * 0.5, max(source.thickness * 0.5, 0.5))
+        }
+    }
+
+    fun moveSourceTo(id: Long, center: Vec2) {
+        val source = sources.firstOrNull { it.id == id } ?: return
+        val frame = sourceFrame(source)
+        val delta = center - frame.center
+        val moved = translate(source, delta)
+        updateSource(moved)
+    }
+
+    fun resizeSource(id: Long, halfWidth: Double, halfHeight: Double) {
+        val source = sources.firstOrNull { it.id == id } ?: return
+        val frame = sourceFrame(source)
+        val hw = halfWidth.coerceIn(0.5, 10.0)
+        val hh = halfHeight.coerceIn(0.5, 10.0)
+        val updated = when (source) {
+            is PointCharge -> source.copy(extent = max(hw, hh).coerceIn(0.5, 20.0))
+            is Magnet -> source.copy(extent = max(hw, hh).coerceIn(0.5, 20.0))
+            is MassSource -> source.copy(extent = max(hw, hh).coerceIn(0.5, 20.0))
+            is GravityZone -> source.copy(
+                min = Vec2(frame.center.x - hw, frame.center.y - hh),
+                max = Vec2(frame.center.x + hw, frame.center.y + hh),
+            )
+
+            is ForceZone -> source.copy(
+                min = Vec2(frame.center.x - hw, frame.center.y - hh),
+                max = Vec2(frame.center.x + hw, frame.center.y + hh),
+            )
+
+            is DragRegion -> source.copy(
+                min = Vec2(frame.center.x - hw, frame.center.y - hh),
+                max = Vec2(frame.center.x + hw, frame.center.y + hh),
+            )
+
+            is WallSegment -> {
+                val dir = (source.end - source.start).normalized().let {
+                    if (it.lengthSquared == 0.0) Vec2(1.0, 0.0) else it
+                }
+                val half = max(hw, 1.0).coerceIn(0.5, 10.0)
+                source.copy(
+                    start = frame.center - dir * half,
+                    end = frame.center + dir * half,
+                )
+            }
+        }
+        updateSource(updated)
     }
 
     // ---------------------------------------------------------------- undo
@@ -418,7 +623,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         markDirty()
     }
 
-    // ---------------------------------------------------------------- probes
+    // ---------------------------------------------------------------- probes & bodies
 
     fun launchProbes(
         count: Int,
@@ -446,8 +651,50 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         markDirty()
     }
 
+    fun launchBodies(
+        count: Int,
+        shape: BodyShape,
+        mass: Double,
+        charge: Double,
+        speed: Double,
+        size: Double,
+        spreadDegrees: Double,
+    ) {
+        val allowed = count.coerceIn(0, MAX_BODIES - bodies.size)
+        if (allowed <= 0) {
+            toast("物体数量已达上限（$MAX_BODIES）")
+            return
+        }
+        val origin = bounds.center
+        val baseAngle = 0.0
+        val halfSpread = Math.toRadians(spreadDegrees) * 0.5
+        repeat(allowed) {
+            val angle = if (halfSpread > 0.0) baseAngle + random.nextDouble(-halfSpread, halfSpread) else baseAngle
+            engine.addBody(
+                Body(
+                    id = nextBodyId++,
+                    position = origin,
+                    velocity = Vec2(kotlin.math.cos(angle) * speed, kotlin.math.sin(angle) * speed),
+                    mass = mass,
+                    charge = charge,
+                    shape = shape,
+                    size = size,
+                ),
+            )
+        }
+        tick++
+        markDirty()
+    }
+
     fun clearProbes() {
         engine.clearProbes()
+        tick++
+        markDirty()
+    }
+
+    fun clearBodies() {
+        bodies.clear()
+        if (selectedBodyId != null) selectedBodyId = null
         tick++
         markDirty()
     }
@@ -465,13 +712,26 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         markDirty()
     }
 
+    fun updateRules(transform: (WorldRules) -> WorldRules) {
+        val previous = rules
+        rules = transform(rules)
+        engine.rules = rules
+        if (previous.gravityEnabled != rules.gravityEnabled) {
+            rebuildEngine()
+        }
+        markDirty()
+    }
+
+    fun updateDisplay(transform: (DisplaySettings) -> DisplaySettings) {
+        display = transform(display)
+        markDirty()
+    }
+
     fun updateWorld(transform: (WorldDef) -> WorldDef) {
         val world = transform(WorldDef(bounds, boundary, globalGravity))
         bounds = world.bounds
         boundary = world.boundary
         globalGravity = world.gravity
-        engine.bounds = bounds
-        engine.boundary = boundary
         rebuildEngine()
         markDirty()
     }
@@ -513,6 +773,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         },
         camera = CameraDef(center = cameraCenter, zoom = zoom),
         visuals = visuals,
+        bodies = bodies.map { it.toDef() },
+        rules = rules,
+        display = display,
     )
 
     fun loadScene(scene: Scene) {
@@ -522,28 +785,32 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         globalGravity = scene.world.gravity
         settings = scene.settings
         visuals = scene.visuals
+        rules = scene.rules
+        display = scene.display
         cameraCenter = scene.camera.center
         zoom = scene.camera.zoom
         sources.clear()
         sources.addAll(scene.sources)
         nextSourceId = (scene.sources.maxOfOrNull { it.id } ?: 0L) + 1L
-        engine = SimulationEngine(
-            field = FieldModel(sources.toList(), globalGravity),
-            bounds = bounds,
-            boundary = boundary,
-            settings = settings,
-            probes = scene.probes.mapTo(ArrayList()) {
-                Probe(
+        bodies.clear()
+        bodies.addAll(
+            scene.bodies.map {
+                Body(
                     id = it.id,
                     position = it.position,
                     velocity = it.velocity,
                     mass = it.mass,
                     charge = it.charge,
-                    radius = it.radius,
+                    shape = it.shape,
+                    size = it.size,
+                    angle = it.angle,
                 )
             },
         )
+        nextBodyId = (scene.bodies.maxOfOrNull { it.id } ?: 0L) + 1L
+        engine = buildEngine(scene.probes.mapTo(ArrayList()) { def -> probeFrom(def) })
         selectedId = null
+        selectedBodyId = null
         undoStack.clear()
         redoStack.clear()
         canUndo = false
@@ -555,6 +822,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     companion object {
         const val MAX_SOURCES = 200
         const val MAX_PROBES = 2000
+        const val MAX_BODIES = 300
         const val UNDO_LIMIT = 20
         const val MIN_POINT_DISTANCE = 0.5
         const val ZONE_HALF = 2.0
@@ -603,18 +871,18 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         }
 
         fun wallAngleDegrees(source: WallSegment): Int =
-            Math.toDegrees(kotlin.math.atan2(source.end.y - source.start.y, source.end.x - source.start.x))
+            Math.toDegrees(atan2(source.end.y - source.start.y, source.end.x - source.start.x))
                 .let { ((it % 360 + 360) % 360).toInt() }
 
         fun magnetAngleDegrees(source: Magnet): Int =
             Math.toDegrees(source.angle).let { ((it % 360 + 360) % 360).toInt() }
 
         fun gravityAngleDegrees(source: GravityZone): Int =
-            Math.toDegrees(kotlin.math.atan2(source.gravity.y, source.gravity.x))
+            Math.toDegrees(atan2(source.gravity.y, source.gravity.x))
                 .let { ((it % 360 + 360) % 360).toInt() }
 
         fun forceAngleDegrees(source: ForceZone): Int =
-            Math.toDegrees(kotlin.math.atan2(source.accel.y, source.accel.x))
+            Math.toDegrees(atan2(source.accel.y, source.accel.x))
                 .let { ((it % 360 + 360) % 360).toInt() }
 
         fun zoneSide(source: FieldSource): Double? {

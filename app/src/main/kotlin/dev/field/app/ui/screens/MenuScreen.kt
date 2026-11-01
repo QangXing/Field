@@ -10,21 +10,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Text
+import dev.field.app.ui.canvas.ScenePreview
 import dev.field.app.ui.components.LabButton
 import dev.field.app.ui.components.TitleText
 import dev.field.app.ui.theme.Accent
@@ -34,10 +36,15 @@ import dev.field.app.ui.theme.Border
 import dev.field.app.ui.theme.GridLine
 import dev.field.app.ui.theme.TextPrimary
 import dev.field.app.ui.theme.TextSecondary
+import dev.field.core.math.Vec2
+import dev.field.core.scene.Scene
 
 @Composable
 fun MenuScreen(
     hasSession: Boolean,
+    background: Scene?,
+    backgroundCenter: Vec2,
+    backgroundZoom: Double,
     onContinue: () -> Unit,
     onNewWorld: () -> Unit,
     onDemo: () -> Unit,
@@ -46,28 +53,60 @@ fun MenuScreen(
     onHelp: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(Bg)) {
-        MenuBackground(Modifier.fillMaxSize())
+        if (background != null) {
+            ScenePreview(
+                scene = background,
+                center = backgroundCenter,
+                zoom = backgroundZoom,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(Modifier.fillMaxSize().background(Bg.copy(alpha = 0.36f)))
+        } else {
+            MenuBackground(Modifier.fillMaxSize())
+        }
 
         Column(
-            modifier = Modifier
-                .align(Alignment.Center)
+            Modifier
+                .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "FIELD LAB // 2D",
+                    color = TextSecondary,
+                    fontSize = 9.sp,
+                    letterSpacing = 1.5.sp,
+                )
+                Text(
+                    "v0.2.0",
+                    color = Accent,
+                    fontSize = 9.sp,
+                    letterSpacing = 1.sp,
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
             LogoMark()
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             TitleText("FIELD LAB", color = TextPrimary)
             Text(
                 "2D 场模拟沙盒 · 电场 / 磁场 / 重力 / 引力 / 阻力",
                 color = TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(top = 6.dp, bottom = 28.dp),
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 6.dp, bottom = 22.dp),
             )
 
             Column(
-                Modifier.width(300.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxWidth().width(320.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 if (hasSession) {
                     LabButton("继续上次世界", onContinue, accent = true, modifier = Modifier.fillMaxWidth())
@@ -78,23 +117,35 @@ fun MenuScreen(
                 LabButton("设置", onSettings, modifier = Modifier.fillMaxWidth())
                 LabButton("帮助", onHelp, modifier = Modifier.fillMaxWidth())
             }
+
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "无网络权限 · 场景以 JSON 保存在本地 · 存档可作主页背景",
+                color = TextSecondary.copy(alpha = 0.7f),
+                fontSize = 9.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
         }
 
-        Text(
-            "v0.1.0 · 无网络权限 · 场景以 JSON 保存在本地",
-            color = TextSecondary.copy(alpha = 0.7f),
-            fontSize = 9.sp,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 14.dp),
-        )
+        // Thin Mindustry-style corner frame.
+        Canvas(Modifier.fillMaxSize()) {
+            val corner = 18f
+            val accent = Accent.copy(alpha = 0.35f)
+            drawLine(accent, Offset(0f, corner), Offset(0f, 0f), 2f)
+            drawLine(accent, Offset(0f, 0f), Offset(corner, 0f), 2f)
+            drawLine(accent, Offset(size.width - corner, 0f), Offset(size.width, 0f), 2f)
+            drawLine(accent, Offset(size.width, 0f), Offset(size.width, corner), 2f)
+            drawLine(accent, Offset(0f, size.height - corner), Offset(0f, size.height), 2f)
+            drawLine(accent, Offset(0f, size.height), Offset(corner, size.height), 2f)
+            drawLine(accent, Offset(size.width - corner, size.height), Offset(size.width, size.height), 2f)
+            drawLine(accent, Offset(size.width, size.height), Offset(size.width, size.height - corner), 2f)
+        }
     }
 }
 
 @Composable
 private fun LogoMark() {
-    Canvas(Modifier.size(width = 150.dp, height = 64.dp)) {
+    Canvas(Modifier.size(width = 132.dp, height = 56.dp)) {
         val h = size.height
         val w = size.width
         val blocks = listOf(
@@ -132,7 +183,6 @@ private fun MenuBackground(modifier: Modifier = Modifier) {
             drawLine(GridLine, Offset(0f, y), Offset(size.width, y), 1f)
             y += step
         }
-        // Faint accent diagonal in the corner.
         val path = Path().apply {
             moveTo(size.width * 0.62f, 0f)
             lineTo(size.width, 0f)
@@ -145,6 +195,12 @@ private fun MenuBackground(modifier: Modifier = Modifier) {
             Border.copy(alpha = 0.5f),
             Offset(0f, size.height * 0.92f),
             Offset(size.width, size.height * 0.92f),
+            strokeWidth = 1f,
+        )
+        drawLine(
+            Accent.copy(alpha = 0.16f),
+            Offset(0f, size.height * 0.18f),
+            Offset(size.width * 0.72f, size.height * 0.18f),
             strokeWidth = 1f,
         )
     }

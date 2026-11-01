@@ -25,6 +25,12 @@ class Probe(
     /** Set when a non-finite state was detected; the probe is frozen at its last good position. */
     var faulted: Boolean = false
 
+    /** Simulated age in seconds, used when the lifetime rule is enabled. */
+    var age: Double = 0.0
+
+    /** Set when this probe had a contact during the current step. */
+    var impact: Boolean = false
+
     private val trailBuffer = ArrayDeque<Vec2>(64)
 
     /** Snapshot of the trail, oldest first. */

@@ -52,6 +52,31 @@ class SaveRepository(private val context: Context) {
 
     fun delete(file: File): Boolean = runCatching { file.delete() }.getOrDefault(false)
 
+    /** Renames a save (both the scene name and the backing file). */
+    fun rename(file: File, newName: String): Result<File> = runCatching {
+        val scene = load(file).getOrThrow()
+        val target = File(dir, safeName(newName) + SCENE_SUFFIX)
+        target.writeText(codec.encode(scene.copy(name = newName.trim().ifEmpty { "未命名世界" })))
+        if (target.absolutePath != file.absolutePath) {
+            file.delete()
+        }
+        target
+    }
+
+    /** Applies [transform] to a stored scene and writes it back. */
+    fun update(file: File, transform: (Scene) -> Scene): Result<Scene> = runCatching {
+        val scene = transform(load(file).getOrThrow())
+        file.writeText(codec.encode(scene))
+        scene
+    }
+
+    fun fileForName(name: String): File = File(dir, safeName(name) + SCENE_SUFFIX)
+
+    fun loadNamed(name: String): Scene? = runCatching {
+        val file = File(dir, name)
+        if (!file.exists()) null else decode(codec, file.readText())
+    }.getOrNull()
+
     fun export(scene: Scene, uri: Uri): Result<Unit> = runCatching {
         val payload = codec.encode(scene).toByteArray()
         context.contentResolver.openOutputStream(uri)?.use { it.write(payload) }

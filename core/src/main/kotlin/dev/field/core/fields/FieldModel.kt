@@ -17,6 +17,8 @@ class FieldModel(
     val kM: Double = 1.0,
     val G: Double = 1.0,
     val softening: Double = 0.05,
+    /** 万有引力开关：关闭后不累加质量体引力与全局重力。 */
+    val gravityEnabled: Boolean = true,
 ) {
     private val vectorScratch = FieldSample()
     private val bzScratch = FieldSample()
@@ -34,6 +36,7 @@ class FieldModel(
         for (source in sources) {
             source.softening = softening
             if (source is MassSource) {
+                if (!gravityEnabled) continue
                 source.gravityConstant = G
             }
             source.accumulate(p, out)
@@ -46,7 +49,7 @@ class FieldModel(
         if (kM != 1.0) {
             out.magneticBz *= kM
         }
-        if (globalGravity.x != 0.0 || globalGravity.y != 0.0) {
+        if (gravityEnabled && (globalGravity.x != 0.0 || globalGravity.y != 0.0)) {
             out.gravity = out.gravity + globalGravity
         }
 

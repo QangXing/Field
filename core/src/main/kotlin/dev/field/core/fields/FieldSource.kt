@@ -26,8 +26,15 @@ sealed class FieldSource {
         return dx * dx + dy * dy + eps2
     }
 
+    /** Square field frame: point sources only contribute inside ±[extent]. */
+    protected fun insideExtent(p: Vec2, center: Vec2, extent: Double): Boolean {
+        if (extent <= 0.0) return true
+        return kotlin.math.abs(p.x - center.x) <= extent && kotlin.math.abs(p.y - center.y) <= extent
+    }
+
     companion object {
         const val DEFAULT_SOFTENING: Double = 0.05
+        const val DEFAULT_EXTENT: Double = 8.0
     }
 }
 
@@ -37,8 +44,11 @@ data class PointCharge(
     override val id: Long,
     val position: Vec2,
     val charge: Double,
+    /** Half side of the square field frame in metres. */
+    val extent: Double = DEFAULT_EXTENT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
+        if (!insideExtent(p, position, extent)) return
         val dx = p.x - position.x
         val dy = p.y - position.y
         val denom = softenedDistanceSquared(dx, dy)
@@ -61,8 +71,10 @@ data class Magnet(
     val position: Vec2,
     val strength: Double,
     val angle: Double,
+    val extent: Double = DEFAULT_EXTENT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
+        if (!insideExtent(p, position, extent)) return
         val ox = cos(angle) * POLE_OFFSET
         val oy = sin(angle) * POLE_OFFSET
         val northX = position.x + ox
@@ -86,10 +98,12 @@ data class MassSource(
     override val id: Long,
     val position: Vec2,
     val mass: Double,
+    val extent: Double = DEFAULT_EXTENT,
 ) : FieldSource() {
     internal var gravityConstant: Double = 1.0
 
     override fun accumulate(p: Vec2, out: FieldSample) {
+        if (!insideExtent(p, position, extent)) return
         val dx = p.x - position.x
         val dy = p.y - position.y
         val denom = softenedDistanceSquared(dx, dy)
