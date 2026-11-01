@@ -188,8 +188,21 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         val id = nextSourceId++
         val half = ZONE_HALF
         return when (tool) {
-            EditorTool.ELECTRIC -> PointCharge(id, p, sign)
-            EditorTool.MAGNETIC -> Magnet(id, p, 1.0, angle)
+            EditorTool.ELECTRIC -> PointCharge(
+                id = id,
+                position = p,
+                charge = sign * UNIFORM_STRENGTH,
+                extent = UNIFORM_HALF,
+                angle = angle,
+            )
+
+            EditorTool.MAGNETIC -> Magnet(
+                id = id,
+                position = p,
+                strength = UNIFORM_MAGNETIC,
+                angle = 0.0,
+                extent = UNIFORM_HALF,
+            )
             EditorTool.GRAVITATIONAL -> MassSource(id, p, 8.0)
             EditorTool.GRAVITY -> GravityZone(
                 id = id,
@@ -256,6 +269,14 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         val point = pointPosition(source)
         if (point != null) {
             if (!inside(point)) return "超出世界边界"
+            val extent = uniformExtent(source)
+            if (extent != null) {
+                if (!inside(Vec2(point.x - extent, point.y - extent)) ||
+                    !inside(Vec2(point.x + extent, point.y + extent))
+                ) {
+                    return "边框超出世界边界"
+                }
+            }
             for (other in sources) {
                 if (other.id == ignoreId) continue
                 val otherPoint = pointPosition(other) ?: continue
@@ -340,6 +361,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
 
     fun placementSpacing(tool: EditorTool): Double = when {
         tool.pointLike || tool.isBody -> 1.0
+        tool == EditorTool.ELECTRIC || tool == EditorTool.MAGNETIC -> UNIFORM_HALF * 2.0 + 0.5
         tool == EditorTool.WALL -> WALL_HALF_LENGTH * 2 + 0.5
         else -> ZONE_HALF * 2 + 0.5
     }
@@ -456,9 +478,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         val pointPadding = max(0.35, 18.0 / zoom)
         return sources.lastOrNull { source ->
             when (source) {
-                is PointCharge -> (source.position - point).length <= pointPadding
+                is PointCharge -> insideUniform(point, source.position, source.extent)
                 is MassSource -> (source.position - point).length <= pointPadding
-                is Magnet -> (source.position - point).length <= pointPadding + 0.35
+                is Magnet -> insideUniform(point, source.position, source.extent)
                 is GravityZone -> source.contains(point)
                 is ForceZone -> source.contains(point)
                 is DragRegion -> source.contains(point)
@@ -833,6 +855,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         const val ZONE_HALF = 2.0
         const val WALL_HALF_LENGTH = 2.0
         const val MAX_LINE_PLACEMENTS = 40
+        const val UNIFORM_HALF = 3.0
+        const val UNIFORM_STRENGTH = 3.0
+        const val UNIFORM_MAGNETIC = 1.5
 
         private val SPEEDS = listOf(0.25, 0.5, 1.0, 2.0, 4.0)
 
@@ -850,6 +875,18 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
             is Magnet -> source.position
             else -> null
         }
+
+        fun uniformExtent(source: FieldSource): Double? = when (source) {
+            is PointCharge -> source.extent
+            is Magnet -> source.extent
+            else -> null
+        }
+
+        fun insideUniform(point: Vec2, center: Vec2, extent: Double): Boolean =
+            abs(point.x - center.x) <= extent && abs(point.y - center.y) <= extent
+
+        fun electricAngleDegrees(source: PointCharge): Int =
+            Math.toDegrees(source.angle).let { ((it % 360 + 360) % 360).toInt() }
 
         fun distanceToSegment(p: Vec2, start: Vec2, end: Vec2): Double {
             val segment = end - start
@@ -881,6 +918,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
 
         fun magnetAngleDegrees(source: Magnet): Int =
             Math.toDegrees(source.angle).let { ((it % 360 + 360) % 360).toInt() }
+
+        fun magneticSign(source: Magnet): String =
+            if (source.strength >= 0.0) "⊙ 出屏" else "⊗ 入屏"
 
         fun gravityAngleDegrees(source: GravityZone): Int =
             Math.toDegrees(atan2(source.gravity.y, source.gravity.x))

@@ -191,15 +191,13 @@ object FieldViz {
             FieldKind.MAGNETIC -> {
                 for (source in field.sources) {
                     if (source is Magnet) {
-                        val northX = source.position.x + cos(source.angle) * Magnet.POLE_OFFSET
-                        val northY = source.position.y + sin(source.angle) * Magnet.POLE_OFFSET
                         for (i in 0 until MAGNET_SEED_COUNT) {
                             val angle = 2.0 * PI * i / MAGNET_SEED_COUNT
                             seeds.add(
                                 clampToBounds(
                                     Vec2(
-                                        northX + cos(angle) * MAGNET_SEED_RADIUS,
-                                        northY + sin(angle) * MAGNET_SEED_RADIUS,
+                                        source.position.x + cos(angle) * MAGNET_SEED_RADIUS,
+                                        source.position.y + sin(angle) * MAGNET_SEED_RADIUS,
                                     ),
                                     bounds,
                                 ),

@@ -21,7 +21,6 @@ class FieldModel(
     val gravityEnabled: Boolean = true,
 ) {
     private val vectorScratch = FieldSample()
-    private val bzScratch = FieldSample()
 
     /** Samples the field at [p]. Allocates exactly one [FieldSample]. */
     fun sample(p: Vec2): FieldSample {
@@ -64,9 +63,8 @@ class FieldModel(
     /**
      * Returns the vector field used for arrows/streamlines of the requested kind.
      *
-     * MAGNETIC uses the in-plane **Bz contour direction**, i.e. the direction
-     * perpendicular to the gradient of Bz: `(dBz/dy, -dBz/dx)`. Its magnitude is not
-     * a physical field strength, only a direction hint; use [sample] for |Bz|.
+     * MAGNETIC is an out-of-plane uniform field in this build, so it has no in-plane
+     * arrow direction and returns [Vec2.ZERO]; the canvas draws ⊙/⊗ symbols instead.
      */
     fun fieldVector(p: Vec2, kind: FieldKind): Vec2 = when (kind) {
         FieldKind.ELECTRIC -> {
@@ -74,7 +72,7 @@ class FieldModel(
             vectorScratch.electric
         }
 
-        FieldKind.MAGNETIC -> bzContourDirection(p)
+        FieldKind.MAGNETIC -> Vec2.ZERO
 
         FieldKind.GRAVITY -> {
             sampleInto(p, vectorScratch)
@@ -94,20 +92,7 @@ class FieldModel(
 
     fun potential(p: Vec2): Double = sample(p).potential
 
-    private fun bzAt(p: Vec2): Double {
-        sampleInto(p, bzScratch)
-        return bzScratch.magneticBz
-    }
-
-    private fun bzContourDirection(p: Vec2): Vec2 {
-        val h = BZ_GRADIENT_STEP
-        val dBzDx = (bzAt(Vec2(p.x + h, p.y)) - bzAt(Vec2(p.x - h, p.y))) / (2.0 * h)
-        val dBzDy = (bzAt(Vec2(p.x, p.y + h)) - bzAt(Vec2(p.x, p.y - h))) / (2.0 * h)
-        return Vec2(dBzDy, -dBzDx)
-    }
-
     companion object {
         const val MAX_DRAG: Double = 5.0
-        private const val BZ_GRADIENT_STEP: Double = 0.02
     }
 }

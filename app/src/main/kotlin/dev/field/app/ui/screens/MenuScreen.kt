@@ -86,7 +86,7 @@ fun MenuScreen(
                     letterSpacing = 1.5.sp,
                 )
                 Text(
-                    "v0.2.1",
+                    "v0.2.2",
                     color = Accent,
                     fontSize = 9.sp,
                     letterSpacing = 1.sp,

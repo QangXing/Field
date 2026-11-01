@@ -25,10 +25,10 @@ enum class EditorTool(
     val isBody: Boolean get() = this == BALL || this == BLOCK
 
     /** Point units have no footprint and snap to the grid. */
-    val pointLike: Boolean get() = this == ELECTRIC || this == MAGNETIC || this == GRAVITATIONAL
+    val pointLike: Boolean get() = this == GRAVITATIONAL
 
     val rotatable: Boolean
-        get() = this == MAGNETIC || this == GRAVITY || this == DRAG ||
+        get() = this == ELECTRIC || this == GRAVITY || this == DRAG ||
             this == FORCE || this == WALL || this == BALL || this == BLOCK
 
     companion object {

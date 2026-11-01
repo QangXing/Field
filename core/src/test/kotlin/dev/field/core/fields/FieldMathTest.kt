@@ -4,67 +4,69 @@ import dev.field.core.math.Vec2
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.pow
-import kotlin.math.sqrt
+import kotlin.math.PI
 
 class FieldMathTest {
 
-    private val eps = FieldSource.DEFAULT_SOFTENING
-
     @Test
-    fun pointChargeFollowsSoftenedInverseSquare() {
-        val model = FieldModel(listOf(PointCharge(1, Vec2.ZERO, 2.0)))
-        val r = 2.0
-        val expectedX = 2.0 * r / (r * r + eps * eps).pow(1.5)
+    fun electricFieldIsUniformInsideFrame() {
+        val model = FieldModel(listOf(PointCharge(1, Vec2.ZERO, 2.0, extent = 2.0)))
+        val inside = model.sample(Vec2(1.0, 0.0))
+        assertEquals(2.0, inside.electric.x, 1e-12)
+        assertEquals(0.0, inside.electric.y, 1e-12)
 
-        val sample = model.sample(Vec2(r, 0.0))
-        assertEquals(expectedX, sample.electric.x, 1e-9)
-        assertEquals(0.0, sample.electric.y, 1e-12)
-
-        // Far from the singularity this approaches kE*q/r^2.
-        val unsoftened = 2.0 / (r * r)
-        assertEquals(unsoftened, sample.electric.length, unsoftened * 0.01)
+        val outside = model.sample(Vec2(2.5, 0.0))
+        assertEquals(0.0, outside.electric.length, 1e-12)
     }
 
     @Test
-    fun pointChargeScalesWithFieldConstants() {
-        val source = PointCharge(1, Vec2.ZERO, 2.0)
+    fun electricFieldDirectionFollowsAngleAndSign() {
+        val angled = FieldModel(
+            listOf(PointCharge(1, Vec2.ZERO, 2.0, extent = 2.0, angle = PI / 2.0)),
+        )
+        val v = angled.sample(Vec2(0.0, 1.0)).electric
+        assertEquals(0.0, v.x, 1e-12)
+        assertEquals(2.0, v.y, 1e-12)
+
+        val reversed = FieldModel(
+            listOf(PointCharge(1, Vec2.ZERO, -2.0, extent = 2.0)),
+        )
+        assertEquals(-2.0, reversed.sample(Vec2(1.0, 0.0)).electric.x, 1e-12)
+    }
+
+    @Test
+    fun electricFieldScalesWithFieldConstants() {
+        val source = PointCharge(1, Vec2.ZERO, 2.0, extent = 2.0)
         val base = FieldModel(listOf(source), kE = 1.0)
         val doubled = FieldModel(listOf(source), kE = 2.0)
-        val p = Vec2(2.0, 0.0)
+        val p = Vec2(1.0, 0.0)
         assertEquals(base.sample(p).electric.x * 2.0, doubled.sample(p).electric.x, 1e-9)
     }
 
     @Test
-    fun potentialMatchesCharge() {
-        val model = FieldModel(listOf(PointCharge(1, Vec2.ZERO, 2.0)))
-        val expected = 2.0 / sqrt(4.0 + eps * eps)
-        assertEquals(expected, model.potential(Vec2(2.0, 0.0)), 1e-9)
+    fun uniformElectricPotentialIsLinear() {
+        val model = FieldModel(listOf(PointCharge(1, Vec2.ZERO, 2.0, extent = 5.0)))
+        // phi = -E·r, E = (2, 0)
+        assertEquals(-4.0, model.potential(Vec2(2.0, 0.0)), 1e-9)
+        assertEquals(0.0, model.potential(Vec2.ZERO), 1e-9)
+        // Outside the frame the field contributes nothing.
+        assertEquals(0.0, model.potential(Vec2(6.0, 0.0)), 1e-9)
     }
 
     @Test
-    fun magneticDipoleIsAntisymmetric() {
-        val model = FieldModel(listOf(Magnet(1, Vec2.ZERO, 1.5, 0.0)))
-        val points = listOf(Vec2(1.0, 2.0), Vec2(-3.0, 1.0), Vec2(0.5, 0.7))
-        for (p in points) {
-            val mirrored = Vec2(-p.x, -p.y)
-            assertEquals(
-                -model.sample(p).magneticBz,
-                model.sample(mirrored).magneticBz,
-                1e-9,
-            )
-        }
-        // The two poles cancel exactly at the magnet center.
-        assertEquals(0.0, model.sample(Vec2.ZERO).magneticBz, 1e-12)
+    fun magneticFieldIsUniformOutOfPlane() {
+        val model = FieldModel(listOf(Magnet(1, Vec2.ZERO, 1.5, extent = 2.0)))
+        assertEquals(1.5, model.sample(Vec2(1.0, 1.0)).magneticBz, 1e-12)
+        assertEquals(0.0, model.sample(Vec2(2.5, 0.0)).magneticBz, 1e-12)
+
+        val reversed = FieldModel(listOf(Magnet(1, Vec2.ZERO, -1.5, extent = 2.0)))
+        assertEquals(-1.5, reversed.sample(Vec2.ZERO).magneticBz, 1e-12)
     }
 
     @Test
-    fun magneticFieldVectorFollowsBzContours() {
-        val model = FieldModel(listOf(Magnet(1, Vec2.ZERO, 1.0, 0.0)))
-        val v = model.fieldVector(Vec2(1.0, 0.0), FieldKind.MAGNETIC)
-        // d(Bz)/dy = 0 on the axis, so the contour direction is along +/-y.
-        assertEquals(0.0, v.x, 1e-3)
-        assertTrue(kotlin.math.abs(v.y) > 0.0)
+    fun magneticFieldHasNoInPlaneArrowDirection() {
+        val model = FieldModel(listOf(Magnet(1, Vec2.ZERO, 1.0, extent = 4.0)))
+        assertEquals(Vec2.ZERO, model.fieldVector(Vec2(1.0, 0.0), FieldKind.MAGNETIC))
     }
 
     @Test

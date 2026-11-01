@@ -636,44 +636,72 @@ private fun SourceInspector(
 
             when (source) {
                 is PointCharge -> {
-                    SectionLabel("电学参数")
+                    SectionLabel("匀强电场参数")
+                    Text(
+                        "边框内场强恒定，边框外为零。负值表示反向。",
+                        color = TextSecondary,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                    )
                     LabSlider(
-                        "电荷量", source.charge, -3.0..3.0,
+                        "电场强度", abs(source.charge), 0.1..10.0,
                         onValueChange = { value ->
                             state.updateSelected { current ->
-                                (current as PointCharge).copy(charge = if (value == 0.0) 0.0001 else value)
+                                val charge = if (current is PointCharge) current.charge else 1.0
+                                (current as PointCharge).copy(
+                                    charge = if (charge < 0.0) -value else value,
+                                )
                             }
                         },
-                        valueText = "%.2f".format(source.charge),
+                        valueText = "%.2f".format(abs(source.charge)),
+                    )
+                    AngleSlider(
+                        value = EditorState.electricAngleDegrees(source).toDouble(),
+                        onValueChange = { degrees ->
+                            state.updateSelected {
+                                (it as PointCharge).copy(angle = Math.toRadians(degrees))
+                            }
+                        },
                     )
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        LabButton("正电荷", { state.updateSelected { (it as PointCharge).copy(charge = 1.0) } }, modifier = Modifier.weight(1f))
-                        LabButton("负电荷", { state.updateSelected { (it as PointCharge).copy(charge = -1.0) } }, modifier = Modifier.weight(1f))
+                        LabButton("反向", {
+                            state.updateSelected { (it as PointCharge).copy(charge = -it.charge) }
+                        }, modifier = Modifier.weight(1f))
+                        LabButton("朝右", {
+                            state.updateSelected { (it as PointCharge).copy(angle = 0.0) }
+                        }, modifier = Modifier.weight(1f))
                     }
                 }
 
                 is Magnet -> {
-                    SectionLabel("磁学参数")
+                    SectionLabel("匀强磁场参数")
+                    Text(
+                        "边框内 Bz 恒定。正值 ⊙ 穿出屏幕，负值 ⊗ 穿入屏幕。",
+                        color = TextSecondary,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                    )
                     LabSlider(
-                        "磁极强度", source.strength, 0.1..3.0,
+                        "磁感应强度 Bz", source.strength, -5.0..5.0,
                         onValueChange = { value ->
-                            state.updateSelected { (it as Magnet).copy(strength = value) }
+                            state.updateSelected {
+                                (it as Magnet).copy(strength = if (value == 0.0) 0.0001 else value)
+                            }
                         },
+                        valueText = "%.2f".format(source.strength),
                     )
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        LabButton("旋转 45°", {
-                            state.updateSelected {
-                                (it as Magnet).copy(angle = it.angle + Math.PI / 4.0)
-                            }
+                        LabButton("反向", {
+                            state.updateSelected { (it as Magnet).copy(strength = -it.strength) }
                         }, modifier = Modifier.weight(1f))
-                        LabButton("N 朝右", {
-                            state.updateSelected { (it as Magnet).copy(angle = 0.0) }
+                        LabButton("⊙ +1.5", {
+                            state.updateSelected { (it as Magnet).copy(strength = 1.5) }
                         }, modifier = Modifier.weight(1f))
                     }
                 }
@@ -1197,8 +1225,8 @@ private fun formatSpeed(speed: Double): String =
     if (speed < 1.0) speed.toString() else speed.toInt().toString()
 
 private fun sourceTitle(source: FieldSource): String = when (source) {
-    is PointCharge -> if (source.charge >= 0.0) "正电荷" else "负电荷"
-    is Magnet -> "磁体（双磁极）"
+    is PointCharge -> "匀强电场"
+    is Magnet -> "匀强磁场"
     is MassSource -> "质量体"
     is GravityZone -> "重力区"
     is ForceZone -> "均匀力区"

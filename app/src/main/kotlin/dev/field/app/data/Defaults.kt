@@ -23,14 +23,16 @@ object Defaults {
     val worldBounds: Aabb = Aabb(-20.0, -12.0, 20.0, 12.0)
 
     fun demoScene(): Scene = Scene(
-        name = "演示：电场 + 磁体",
+        name = "演示：匀强电场 + 匀强磁场",
         world = WorldDef(bounds = worldBounds, boundary = Boundary.REFLECT, gravity = Vec2.ZERO),
         settings = SimSettings(),
         sources = listOf(
-            PointCharge(1, Vec2(-6.0, 0.0), 1.0, extent = 9.0),
-            PointCharge(2, Vec2(6.0, 0.0), -1.0, extent = 9.0),
-            Magnet(3, Vec2(0.0, 6.5), 1.0, angle = 0.0, extent = 9.0),
-            MassSource(4, Vec2(0.0, -7.0), 8.0, extent = 9.0),
+            // Two uniform electric patches pushing towards the centre.
+            PointCharge(1, Vec2(-6.0, 0.0), 2.0, extent = 5.0, angle = 0.0),
+            PointCharge(2, Vec2(6.0, 0.0), 2.0, extent = 5.0, angle = Math.PI),
+            // Uniform Bz pointing out of the screen.
+            Magnet(3, Vec2(0.0, 6.5), 1.5, angle = 0.0, extent = 5.0),
+            MassSource(4, Vec2(0.0, -7.0), 8.0),
             DragRegion(
                 id = 5,
                 min = Vec2(10.0, -5.0),

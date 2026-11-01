@@ -38,57 +38,54 @@ sealed class FieldSource {
     }
 }
 
+/**
+ * Uniform electric field over a square region.
+ *
+ * The legacy name is kept so existing JSON v2/v3 saves remain readable.
+ * Inside the frame [out] receives `|charge|` in the direction [angle]; outside it is zero.
+ * Negative [charge] reverses the direction.
+ */
 @Serializable
 @SerialName("charge")
 data class PointCharge(
     override val id: Long,
     val position: Vec2,
+    /** Signed field strength along [angle]. */
     val charge: Double,
     /** Half side of the square field frame in metres. */
     val extent: Double = DEFAULT_EXTENT,
+    /** Direction of the field in radians. */
+    val angle: Double = 0.0,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
         if (!insideExtent(p, position, extent)) return
-        val dx = p.x - position.x
-        val dy = p.y - position.y
-        val denom = softenedDistanceSquared(dx, dy)
-        val invR = 1.0 / sqrt(denom)
-        val invR3 = invR / denom
-        val scaled = charge * invR3
-        out.electric = Vec2(out.electric.x + scaled * dx, out.electric.y + scaled * dy)
-        out.potential += charge * invR
+        val ex = cos(angle) * charge
+        val ey = sin(angle) * charge
+        out.electric = Vec2(out.electric.x + ex, out.electric.y + ey)
+        // Potential of a uniform field: -E·(p - centre).
+        out.potential += -(ex * (p.x - position.x) + ey * (p.y - position.y))
     }
 }
 
 /**
- * Two-pole magnet approximation. `Bz` is the out-of-plane component produced by a
- * positive (north) and negative (south) pole offset by ±0.35 m along [angle].
+ * Uniform out-of-plane magnetic field `Bz` over a square region.
+ *
+ * The legacy name (and the stored [angle] field) are kept for JSON compatibility;
+ * a uniform perpendicular field has no in-plane orientation, so [angle] is ignored.
  */
 @Serializable
 @SerialName("magnet")
 data class Magnet(
     override val id: Long,
     val position: Vec2,
+    /** Signed out-of-plane magnetic flux density. */
     val strength: Double,
-    val angle: Double,
+    val angle: Double = 0.0,
     val extent: Double = DEFAULT_EXTENT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
         if (!insideExtent(p, position, extent)) return
-        val ox = cos(angle) * POLE_OFFSET
-        val oy = sin(angle) * POLE_OFFSET
-        val northX = position.x + ox
-        val northY = position.y + oy
-        val southX = position.x - ox
-        val southY = position.y - oy
-
-        val northDenom = softenedDistanceSquared(p.x - northX, p.y - northY)
-        val southDenom = softenedDistanceSquared(p.x - southX, p.y - southY)
-        out.magneticBz += strength * (1.0 / northDenom - 1.0 / southDenom)
-    }
-
-    companion object {
-        const val POLE_OFFSET: Double = 0.35
+        out.magneticBz += strength
     }
 }
 

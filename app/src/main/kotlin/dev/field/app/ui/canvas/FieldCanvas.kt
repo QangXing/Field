@@ -583,16 +583,25 @@ private fun DrawScope.drawSource(
         is PointCharge -> {
             val center = Offset(sx(source.position.x), sy(source.position.y))
             val color = if (source.charge >= 0.0) FieldElectric else Danger
-            drawCircle(color.copy(alpha = 0.18f), radius = max(10f, 0.45f * zoom), center = center)
-            drawCircle(color, radius = max(7f, 0.3f * zoom), center = center)
-            drawCircle(color.copy(alpha = 0.9f), radius = max(7f, 0.3f * zoom), center = center, style = Stroke(1.2f))
+            drawUniformRegion(source.position, source.extent, color, sx, sy, zoom)
+            drawElectricFieldIcon(source, color, textMeasurer, sx, sy, zoom)
+            if (selected) {
+                drawRect(
+                    Accent.copy(alpha = 0.9f),
+                    Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent)),
+                    Size(
+                        (source.extent * 2.0).toFloat() * zoom,
+                        (source.extent * 2.0).toFloat() * zoom,
+                    ),
+                    style = Stroke(2f),
+                )
+            }
             drawText(
                 textMeasurer,
-                if (source.charge >= 0.0) "+" else "−",
-                topLeft = Offset(center.x - 4.dp.toPx(), center.y - 8.dp.toPx()),
-                style = TextStyle(color = Bg, fontSize = 12.sp),
+                "E ${"%.1f".format(kotlin.math.abs(source.charge))}",
+                topLeft = Offset(center.x + 8f, center.y - 22f),
+                style = TextStyle(color = color, fontSize = 9.sp),
             )
-            if (selected) drawCircle(Accent, max(13f, 0.55f * zoom), center, style = Stroke(2f))
         }
 
         is MassSource -> {
@@ -611,33 +620,126 @@ private fun DrawScope.drawSource(
 
         is Magnet -> {
             val center = Offset(sx(source.position.x), sy(source.position.y))
-            val angle = source.angle
-            val northX = source.position.x + cos(angle) * Magnet.POLE_OFFSET
-            val northY = source.position.y + sin(angle) * Magnet.POLE_OFFSET
-            val southX = source.position.x - cos(angle) * Magnet.POLE_OFFSET
-            val southY = source.position.y - sin(angle) * Magnet.POLE_OFFSET
-            val north = Offset(sx(northX), sy(northY))
-            val south = Offset(sx(southX), sy(southY))
-            drawLine(FieldMagnetic.copy(alpha = 0.8f), south, north, strokeWidth = 3f)
-            drawCircle(Danger, 5f, north)
-            drawCircle(FieldElectric, 5f, south)
+            drawUniformRegion(source.position, source.extent, FieldMagnetic, sx, sy, zoom)
+            drawMagneticFieldSymbols(source, sx, sy, zoom, FieldMagnetic)
+            if (selected) {
+                drawRect(
+                    Accent.copy(alpha = 0.9f),
+                    Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent)),
+                    Size(
+                        (source.extent * 2.0).toFloat() * zoom,
+                        (source.extent * 2.0).toFloat() * zoom,
+                    ),
+                    style = Stroke(2f),
+                )
+            }
             drawText(
                 textMeasurer,
-                "N",
-                topLeft = Offset(north.x + 5f, north.y - 14f),
-                style = TextStyle(color = Danger, fontSize = 9.sp),
+                "Bz ${"%.1f".format(source.strength)}",
+                topLeft = Offset(center.x + 8f, center.y - 22f),
+                style = TextStyle(color = FieldMagnetic, fontSize = 9.sp),
             )
-            drawText(
-                textMeasurer,
-                "S",
-                topLeft = Offset(south.x + 5f, south.y + 1f),
-                style = TextStyle(color = FieldElectric, fontSize = 9.sp),
-            )
-            if (selected) drawCircle(Accent, max(16f, 0.7f * zoom), center, style = Stroke(2f))
         }
 
         is WallSegment -> Unit
         else -> Unit
+    }
+}
+
+/** Low-alpha fill and border for a square uniform-field region. */
+private fun DrawScope.drawUniformRegion(
+    position: Vec2,
+    extent: Double,
+    color: Color,
+    sx: (Double) -> Float,
+    sy: (Double) -> Float,
+    zoom: Float,
+) {
+    val topLeft = Offset(sx(position.x - extent), sy(position.y + extent))
+    val size = Size((extent * 2.0).toFloat() * zoom, (extent * 2.0).toFloat() * zoom)
+    drawRect(color.copy(alpha = 0.10f), topLeft, size)
+    drawRect(color.copy(alpha = 0.55f), topLeft, size, style = Stroke(1.5f))
+}
+
+/** Centre arrow showing the uniform E direction (flips with the sign of the strength). */
+private fun DrawScope.drawElectricFieldIcon(
+    source: PointCharge,
+    color: Color,
+    textMeasurer: TextMeasurer,
+    sx: (Double) -> Float,
+    sy: (Double) -> Float,
+    zoom: Float,
+) {
+    val center = Offset(sx(source.position.x), sy(source.position.y))
+    val sign = if (source.charge >= 0.0) 1.0 else -1.0
+    val dirX = (cos(source.angle) * sign).toFloat()
+    val dirY = (-sin(source.angle) * sign).toFloat()
+    val length = max(18f, 0.8f * zoom)
+    val start = Offset(center.x - dirX * length * 0.5f, center.y - dirY * length * 0.5f)
+    val end = Offset(center.x + dirX * length * 0.5f, center.y + dirY * length * 0.5f)
+    drawLine(color.copy(alpha = 0.9f), start, end, strokeWidth = 3f)
+    drawCircle(color, max(3f, 0.1f * zoom), center)
+    val head = length * 0.28f
+    val perpX = -dirY
+    val perpY = dirX
+    drawLine(
+        color,
+        end,
+        Offset(end.x - dirX * head + perpX * head * 0.5f, end.y - dirY * head + perpY * head * 0.5f),
+        3f,
+    )
+    drawLine(
+        color,
+        end,
+        Offset(end.x - dirX * head - perpX * head * 0.5f, end.y - dirY * head - perpY * head * 0.5f),
+        3f,
+    )
+    drawText(
+        textMeasurer,
+        "E",
+        topLeft = Offset(end.x + 4f, end.y - 14f),
+        style = TextStyle(color = color, fontSize = 10.sp),
+    )
+}
+
+/** ⊙ / ⊗ lattice visualising a uniform out-of-plane magnetic field. */
+private fun DrawScope.drawMagneticFieldSymbols(
+    source: Magnet,
+    sx: (Double) -> Float,
+    sy: (Double) -> Float,
+    zoom: Float,
+    color: Color,
+) {
+    val extent = source.extent
+    if (extent <= 0.0) return
+    val step = 2.0
+    val radius = min(10f, max(4f, 0.2f * zoom))
+    var gx = -extent + 1.0
+    while (gx <= extent - 0.5) {
+        var gy = -extent + 1.0
+        while (gy <= extent - 0.5) {
+            val center = Offset(sx(source.position.x + gx), sy(source.position.y + gy))
+            drawCircle(color.copy(alpha = 0.8f), radius, center, style = Stroke(1.4f))
+            if (source.strength >= 0.0) {
+                drawCircle(color.copy(alpha = 0.8f), radius * 0.28f, center)
+            } else {
+                val d = radius * 0.55f
+                drawLine(
+                    color.copy(alpha = 0.8f),
+                    Offset(center.x - d, center.y - d),
+                    Offset(center.x + d, center.y + d),
+                    strokeWidth = 1.4f,
+                )
+                drawLine(
+                    color.copy(alpha = 0.8f),
+                    Offset(center.x - d, center.y + d),
+                    Offset(center.x + d, center.y - d),
+                    strokeWidth = 1.4f,
+                )
+            }
+            gy += step
+        }
+        gx += step
     }
 }
 
@@ -1017,21 +1119,36 @@ private fun DrawScope.drawGhost(
 
     val source = ghost.source ?: return
     when (source) {
-        is PointCharge, is MassSource, is Magnet -> {
-            val point = when (source) {
-                is PointCharge -> source.position
-                is MassSource -> source.position
-                is Magnet -> source.position
-                else -> return
-            }
-            val center = Offset(sx(point.x), sy(point.y))
-            val radius = if (source is Magnet) max(14f, 0.7f * zoom) else max(12f, 0.45f * zoom)
+        is PointCharge -> {
+            val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
+            val extentSize = Size(
+                (source.extent * 2.0).toFloat() * zoom,
+                (source.extent * 2.0).toFloat() * zoom,
+            )
+            drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
+            drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            drawElectricFieldIcon(source, color, textMeasurer, sx, sy, zoom)
+        }
+
+        is Magnet -> {
+            val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
+            val extentSize = Size(
+                (source.extent * 2.0).toFloat() * zoom,
+                (source.extent * 2.0).toFloat() * zoom,
+            )
+            drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
+            drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            drawMagneticFieldSymbols(source, sx, sy, zoom, color)
+        }
+
+        is MassSource -> {
+            val center = Offset(sx(source.position.x), sy(source.position.y))
+            val radius = max(12f, 0.45f * zoom)
             drawCircle(color.copy(alpha = 0.16f), radius, center)
             drawCircle(color, radius, center, style = Stroke(2f))
             drawText(
                 textMeasurer,
-                if (source is PointCharge && source.charge >= 0.0) "+" else
-                    if (source is PointCharge) "−" else "·",
+                "M",
                 topLeft = Offset(center.x - 4.dp.toPx(), center.y - 8.dp.toPx()),
                 style = TextStyle(color = color, fontSize = 12.sp),
             )
@@ -1066,14 +1183,12 @@ private fun DrawScope.drawGhost(
 
 private fun buildArrowLayers(field: FieldModel, bounds: Aabb): List<ArrowLayer> {
     val hasElectric = field.sources.any { it is PointCharge }
-    val hasMagnetic = field.sources.any { it is Magnet }
     val hasGravity = field.sources.any { it is MassSource || it is GravityZone }
     val hasDrag = field.sources.any { it is DragRegion }
     val hasForce = field.sources.any { it is ForceZone }
 
-    val layers = ArrayList<ArrowLayer>(5)
+    val layers = ArrayList<ArrowLayer>(4)
     if (hasElectric) addLayer(layers, field, bounds, FieldKind.ELECTRIC, FieldElectric)
-    if (hasMagnetic) addLayer(layers, field, bounds, FieldKind.MAGNETIC, FieldMagnetic)
     if (hasGravity) addLayer(layers, field, bounds, FieldKind.GRAVITY, FieldGravity)
     if (hasDrag) addLayer(layers, field, bounds, FieldKind.DRAG, FieldDrag)
     if (hasForce) addLayer(layers, field, bounds, FieldKind.UNIFORM_FORCE, FieldForce)
@@ -1093,22 +1208,13 @@ private fun addLayer(
 }
 
 private fun buildStreamLayers(field: FieldModel, bounds: Aabb): List<StreamLayer> {
-    val layers = ArrayList<StreamLayer>(2)
+    val layers = ArrayList<StreamLayer>(1)
     if (field.sources.any { it is PointCharge }) {
         val seeds = FieldViz.defaultSeeds(field, FieldKind.ELECTRIC, bounds)
         layers.add(
             StreamLayer(
                 FieldElectric,
                 FieldViz.streamlines(field, FieldKind.ELECTRIC, seeds, bounds, maxSteps = 200, step = 0.18),
-            ),
-        )
-    }
-    if (field.sources.any { it is Magnet }) {
-        val seeds = FieldViz.defaultSeeds(field, FieldKind.MAGNETIC, bounds)
-        layers.add(
-            StreamLayer(
-                FieldMagnetic,
-                FieldViz.streamlines(field, FieldKind.MAGNETIC, seeds, bounds, maxSteps = 200, step = 0.18),
             ),
         )
     }

@@ -96,10 +96,28 @@ fun ScenePreview(
                 )
 
                 is PointCharge -> {
-                    val c = screen(source.position)
+                    val topLeft = Offset(
+                        sx(source.position.x - source.extent),
+                        sy(source.position.y + source.extent),
+                    )
+                    val extentSize = Size(
+                        (source.extent * 2.0).toFloat() * z,
+                        (source.extent * 2.0).toFloat() * z,
+                    )
                     val color = if (source.charge >= 0.0) FieldElectric else Danger
-                    drawCircle(color.copy(alpha = 0.20f), max(8f, 0.45f * z), c)
-                    drawCircle(color, max(5f, 0.28f * z), c, style = Stroke(1.5f))
+                    drawRect(color.copy(alpha = 0.08f), topLeft, extentSize)
+                    drawRect(color.copy(alpha = 0.45f), topLeft, extentSize, style = Stroke(1.2f))
+                    val sign = if (source.charge >= 0.0) 1.0 else -1.0
+                    val c = screen(source.position)
+                    val dx = (cos(source.angle) * sign).toFloat()
+                    val dy = (-sin(source.angle) * sign).toFloat()
+                    val len = max(10f, 0.6f * z)
+                    drawLine(
+                        color,
+                        Offset(c.x - dx * len * 0.5f, c.y - dy * len * 0.5f),
+                        Offset(c.x + dx * len * 0.5f, c.y + dy * len * 0.5f),
+                        1.6f,
+                    )
                 }
 
                 is MassSource -> {
@@ -109,22 +127,35 @@ fun ScenePreview(
                 }
 
                 is Magnet -> {
-                    val a = source.angle
-                    val n = screen(
-                        Vec2(
-                            source.position.x + cos(a) * Magnet.POLE_OFFSET,
-                            source.position.y + sin(a) * Magnet.POLE_OFFSET,
-                        ),
+                    val topLeft = Offset(
+                        sx(source.position.x - source.extent),
+                        sy(source.position.y + source.extent),
                     )
-                    val s = screen(
-                        Vec2(
-                            source.position.x - cos(a) * Magnet.POLE_OFFSET,
-                            source.position.y - sin(a) * Magnet.POLE_OFFSET,
-                        ),
+                    val extentSize = Size(
+                        (source.extent * 2.0).toFloat() * z,
+                        (source.extent * 2.0).toFloat() * z,
                     )
-                    drawLine(FieldMagnetic.copy(alpha = 0.8f), s, n, strokeWidth = 2f)
-                    drawCircle(Danger, 3.5f, n)
-                    drawCircle(FieldElectric, 3.5f, s)
+                    drawRect(FieldMagnetic.copy(alpha = 0.08f), topLeft, extentSize)
+                    drawRect(FieldMagnetic.copy(alpha = 0.45f), topLeft, extentSize, style = Stroke(1.2f))
+                    val step = 2.0
+                    val radius = min(5f, max(2f, 0.12f * z))
+                    var gx = -source.extent + 1.0
+                    while (gx <= source.extent - 0.5) {
+                        var gy = -source.extent + 1.0
+                        while (gy <= source.extent - 0.5) {
+                            val c = screen(Vec2(source.position.x + gx, source.position.y + gy))
+                            drawCircle(FieldMagnetic.copy(alpha = 0.7f), radius, c, style = Stroke(1f))
+                            if (source.strength >= 0.0) {
+                                drawCircle(FieldMagnetic.copy(alpha = 0.7f), radius * 0.28f, c)
+                            } else {
+                                val d = radius * 0.55f
+                                drawLine(FieldMagnetic, Offset(c.x - d, c.y - d), Offset(c.x + d, c.y + d), 1f)
+                                drawLine(FieldMagnetic, Offset(c.x - d, c.y + d), Offset(c.x + d, c.y - d), 1f)
+                            }
+                            gy += step
+                        }
+                        gx += step
+                    }
                 }
 
                 else -> Unit
@@ -220,7 +251,6 @@ private fun DrawScope.drawPreviewArrows(
 ) {
     val kinds = mutableListOf<Pair<FieldKind, Color>>()
     if (field.sources.any { it is PointCharge }) kinds.add(FieldKind.ELECTRIC to FieldElectric)
-    if (field.sources.any { it is Magnet }) kinds.add(FieldKind.MAGNETIC to FieldMagnetic)
     if (field.sources.any { it is MassSource || it is GravityZone }) kinds.add(FieldKind.GRAVITY to FieldGravity)
     if (field.sources.any { it is ForceZone }) kinds.add(FieldKind.UNIFORM_FORCE to FieldForce)
     if (field.sources.any { it is DragRegion }) kinds.add(FieldKind.DRAG to FieldDrag)

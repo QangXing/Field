@@ -29,7 +29,9 @@ class FieldVizTest {
 
     @Test
     fun heatmapHasNormalizedGrid() {
-        val field = FieldModel(listOf(PointCharge(1, Vec2(0.0, -5.0), 2.0)))
+        val field = FieldModel(
+            listOf(PointCharge(1, Vec2(0.0, -5.0), 2.0, extent = 20.0, angle = Math.PI / 2.0)),
+        )
         val heatmap = FieldViz.heatmap(field, bounds, cols = 8, rows = 6, mode = HeatmapMode.POTENTIAL)
 
         assertEquals(8, heatmap.cols)
@@ -37,7 +39,7 @@ class FieldVizTest {
         assertEquals(48, heatmap.values.size)
         assertTrue(heatmap.values.all { it >= 0f && it <= 1f })
 
-        // Row 0 is at minY, closest to the charge, so it must be brighter than the top row.
+        // A uniform field along +y makes potential decrease with y, so row 0 is brighter.
         val bottomAverage = (0 until 8).sumOf { heatmap.values[it].toDouble() } / 8.0
         val topAverage = (40 until 48).sumOf { heatmap.values[it].toDouble() } / 8.0
         assertTrue(bottomAverage > topAverage)

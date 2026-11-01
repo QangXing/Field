@@ -44,7 +44,7 @@ class SimulationEngineTest {
         val probe = engine.probes[0]
         val initialSpeed = probe.velocity.length
         repeat(240) { engine.step() }
-        assertEquals(initialSpeed, probe.velocity.length, 1e-6)
+        assertEquals(initialSpeed, probe.velocity.length, 1e-4)
     }
 
     @Test

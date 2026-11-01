@@ -120,6 +120,7 @@ object SceneValidator {
             is PointCharge -> {
                 validateVec(errors, "$prefix.position", source.position)
                 validateNumber(errors, "$prefix.charge", source.charge)
+                validateNumber(errors, "$prefix.angle", source.angle)
                 validateExtent(prefix, source.extent, errors)
                 if (source.charge == 0.0) {
                     errors.add(SceneError("$prefix.charge", "不能为 0"))
