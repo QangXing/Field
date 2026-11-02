@@ -101,6 +101,12 @@ object SceneValidator {
         validateNumber(errors, "settings.fixedDt", scene.settings.fixedDt)
         validateNumber(errors, "settings.speed", scene.settings.speed)
         validateNumber(errors, "settings.gridSnap", scene.settings.gridSnap)
+        if (!(scene.settings.fixedDt > 0.0)) {
+            errors.add(SceneError("settings.fixedDt", "必须为正数"))
+        }
+        if (scene.settings.subSteps < 1) {
+            errors.add(SceneError("settings.subSteps", "必须至少为 1"))
+        }
     }
 
     private fun validateExtent(prefix: String, extent: Double, errors: MutableList<SceneError>) {

@@ -164,8 +164,13 @@ fun LabSlider(
             Text(label, color = TextSecondary, fontSize = 11.sp)
             Text(valueText, color = TextPrimary, fontSize = 11.sp)
         }
+        val safeValue = if (value.isFinite()) {
+            value.coerceIn(range.start, range.endInclusive)
+        } else {
+            range.start
+        }
         Slider(
-            value = value.toFloat(),
+            value = safeValue.toFloat(),
             onValueChange = { onValueChange(it.toDouble()) },
             onValueChangeFinished = onFinished,
             valueRange = range.start.toFloat()..range.endInclusive.toFloat(),

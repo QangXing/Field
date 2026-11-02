@@ -4,7 +4,7 @@
 | --- | --- |
 | 版本 | v0.4（实现基准） |
 | 日期 | 2026-11-01 |
-| 状态 | 已实现（0.3.0） |
+| 状态 | 已实现（0.3.1） |
 | 平台 | Android 原生（竖屏） |
 | 技术栈 | Kotlin 2.x + Jetpack Compose + 自研场引擎 |
 | 最低版本 | Android 8.0（API 26），targetSdk 34 |
@@ -71,6 +71,13 @@
 - **圆形场**：`FieldShape` 支持 `RECT` / `CIRCLE`，适用于电场、磁场、质量体、重力区、力区与阻力区；圆形取内切圆/半径，边框外严格为零。检查器提供"方形 / 圆形"切换与半径滑杆；画布绘制虚线圆、圆周手柄，并按半径调整尺寸。
 - **字体**：原始字体统一存放于 `docs/fonts/`（Buildings display、Maple Mono NF CN、Mochiy Pop One、Noto Sans JP）。应用使用 `field_display.otf` 作为 "FIELD LAB" 字标，使用 Maple Mono NF CN 的 GB2312 子集（`res/font/maple_mono_cn_extra_bold.ttf`）作为全局 UI 字体，避免 18 MB 原始字体进入 APK。
 - **动态主页背景**：主页背景不再使用静态快照，而是由 `AnimatedScenePreview` 从存档构建 `SimulationEngine` 并持续步进（≤600 探针 / ≤80 物体，30 Hz），小球、方块与探针在压暗的背景中继续运动。
+
+### 0.9 稳定性修复（0.3.1）
+
+- 所有滑杆在渲染前把数值钳制到合法区间，避免物体速度超过滑杆范围（例如磁场中加速后的箱子）或其他导入数据导致 Slider 参数越界。
+- 场景校验增加 `fixedDt > 0` 与 `subSteps ≥ 1` 检查，防止异常导入参数把固定步长循环变为忙等。
+- 新增崩溃诊断：未捕获异常写入 `filesDir/last_crash.txt`；设置页可查看摘要、复制完整堆栈或清除，方便用户直接反馈闪退日志。
+- 使用 Robolectric 对“单个磁场 + 单个箱子”的沙盒与动态主页背景各跑 120 帧压力渲染，未复现异常。
 
 ---
 

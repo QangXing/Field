@@ -933,14 +933,14 @@ private fun BodyInspector(
                 valueText = "${EditorState.format(body.size)} m",
             )
             LabSlider(
-                "速度 X", body.velocity.x, -20.0..20.0,
+                "速度 X", body.velocity.x, -30.0..30.0,
                 onValueChange = { value ->
                     state.updateSelectedBody { it.velocity = Vec2(value, it.velocity.y) }
                 },
                 valueText = "${EditorState.format(body.velocity.x, 2)} m/s",
             )
             LabSlider(
-                "速度 Y", body.velocity.y, -20.0..20.0,
+                "速度 Y", body.velocity.y, -30.0..30.0,
                 onValueChange = { value ->
                     state.updateSelectedBody { it.velocity = Vec2(it.velocity.x, value) }
                 },

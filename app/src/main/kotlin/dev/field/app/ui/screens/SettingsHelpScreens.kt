@@ -1,13 +1,17 @@
 package dev.field.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -16,12 +20,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.field.app.data.AppPrefs
+import dev.field.app.data.CrashLog
 import dev.field.app.ui.components.DividerLine
 import dev.field.app.ui.components.KeyValueRow
 import dev.field.app.ui.components.LabButton
@@ -32,6 +45,8 @@ import dev.field.app.ui.components.SectionLabel
 import dev.field.app.ui.components.TitleText
 import dev.field.app.ui.theme.Accent
 import dev.field.app.ui.theme.Bg
+import dev.field.app.ui.theme.Surface
+import dev.field.app.ui.theme.TextPrimary
 import dev.field.app.ui.theme.TextSecondary
 
 @Composable
@@ -40,6 +55,9 @@ fun AppSettingsScreen(
     onOpenBackground: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var crashLog by remember { mutableStateOf(CrashLog.read(context)) }
+    var showCrashLog by remember { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxSize()
@@ -86,10 +104,55 @@ fun AppSettingsScreen(
                 Spacer(Modifier.height(6.dp))
             }
 
+            LabPanel(Modifier.fillMaxWidth(), accent = true) {
+                SectionLabel("诊断")
+                Text(
+                    "若应用意外退出，最近一次崩溃堆栈会保存在本机。复制后可反馈给开发者定位问题。",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                )
+                val clipboard = LocalClipboardManager.current
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    LabButton("复制崩溃日志", {
+                        crashLog?.let { clipboard.setText(AnnotatedString(it)) }
+                    }, enabled = crashLog != null, modifier = Modifier.weight(1f))
+                    LabButton("清除", {
+                        CrashLog.clear(context)
+                        crashLog = null
+                    }, enabled = crashLog != null, modifier = Modifier.weight(1f))
+                }
+                if (crashLog != null) {
+                    Text(
+                        crashLog!!,
+                        color = TextPrimary,
+                        fontSize = 8.sp,
+                        lineHeight = 11.sp,
+                        maxLines = 14,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 170.dp)
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                } else {
+                    Text(
+                        "暂无崩溃记录",
+                        color = TextSecondary,
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
             LabPanel(Modifier.fillMaxWidth()) {
                 SectionLabel("关于")
                 KeyValueRow("应用", "Field Lab")
-                KeyValueRow("版本", "0.3.0")
+                KeyValueRow("版本", "0.3.1")
                 KeyValueRow("平台", "Android 8.0+ · 竖屏")
                 KeyValueRow("引擎", "自研确定性场模拟")
                 KeyValueRow("权限", "无敏感权限")
@@ -174,6 +237,7 @@ fun HelpScreen(onBack: () -> Unit) {
                     "选中物体后：拖动其中心圆点移动；拖动其他空白区域平移世界。",
                     "双指捏合缩放，缩放锚定手指位置；存档设置可关闭滑动改变摄像机。",
                     "「设」打开世界设置：边界、积分器、14 项世界规则与显示设置。",
+                    "设置页提供崩溃日志复制：若闪退，可在「设置 → 诊断」复制堆栈反馈。",
                     "「存」快速保存，「档」打开存档内操作（命名/保存/导出/导入）。",
                 ),
             )
