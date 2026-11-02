@@ -26,7 +26,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.field.app.ui.canvas.ScenePreview
+import dev.field.app.ui.canvas.AnimatedScenePreview
 import dev.field.app.ui.components.LabButton
 import dev.field.app.ui.components.TitleText
 import dev.field.app.ui.theme.Accent
@@ -54,7 +54,7 @@ fun MenuScreen(
 ) {
     Box(Modifier.fillMaxSize().background(Bg)) {
         if (background != null) {
-            ScenePreview(
+            AnimatedScenePreview(
                 scene = background,
                 center = backgroundCenter,
                 zoom = backgroundZoom,
@@ -86,7 +86,7 @@ fun MenuScreen(
                     letterSpacing = 1.5.sp,
                 )
                 Text(
-                    "v0.2.2",
+                    "v0.3.0",
                     color = Accent,
                     fontSize = 9.sp,
                     letterSpacing = 1.sp,
@@ -96,7 +96,7 @@ fun MenuScreen(
             Spacer(Modifier.height(28.dp))
             LogoMark()
             Spacer(Modifier.height(10.dp))
-            TitleText("FIELD LAB", color = TextPrimary)
+            TitleText("FIELD LAB", color = TextPrimary, fontFamily = dev.field.app.ui.theme.DisplayFont)
             Text(
                 "2D 场模拟沙盒 · 电场 / 磁场 / 重力 / 引力 / 阻力",
                 color = TextSecondary,

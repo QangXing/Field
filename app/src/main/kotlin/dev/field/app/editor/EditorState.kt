@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import dev.field.app.data.Defaults
 import dev.field.core.fields.DragRegion
 import dev.field.core.fields.FieldModel
+import dev.field.core.fields.FieldShape
 import dev.field.core.fields.FieldSource
 import dev.field.core.fields.ForceZone
 import dev.field.core.fields.GravityZone
@@ -45,9 +46,13 @@ data class SourceFrame(
     val center: Vec2,
     val halfWidth: Double,
     val halfHeight: Double,
+    val shape: FieldShape = FieldShape.RECT,
 ) {
     val width: Double get() = halfWidth * 2.0
     val height: Double get() = halfHeight * 2.0
+
+    /** Radius used by circular frames (inscribed in the rectangle). */
+    val circleRadius: Double get() = min(halfWidth, halfHeight)
 }
 
 /**
@@ -71,6 +76,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     var selectedBodyId by mutableStateOf<Long?>(null)
     var tool by mutableStateOf<EditorTool?>(null)
     var chargeSign by mutableStateOf(1.0)
+    var placementShape by mutableStateOf(FieldShape.RECT)
     var rotationDeg by mutableStateOf(0)
     var isRunning by mutableStateOf(true)
     var tick by mutableStateOf(0)
@@ -187,6 +193,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         val angle = Math.toRadians(rotation.toDouble())
         val id = nextSourceId++
         val half = ZONE_HALF
+        val shape = placementShape
         return when (tool) {
             EditorTool.ELECTRIC -> PointCharge(
                 id = id,
@@ -194,6 +201,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
                 charge = sign * UNIFORM_STRENGTH,
                 extent = UNIFORM_HALF,
                 angle = angle,
+                shape = shape,
             )
 
             EditorTool.MAGNETIC -> Magnet(
@@ -202,13 +210,21 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
                 strength = UNIFORM_MAGNETIC,
                 angle = 0.0,
                 extent = UNIFORM_HALF,
+                shape = shape,
             )
-            EditorTool.GRAVITATIONAL -> MassSource(id, p, 8.0)
+            EditorTool.GRAVITATIONAL -> MassSource(
+                id = id,
+                position = p,
+                mass = 8.0,
+                extent = UNIFORM_HALF,
+                shape = shape,
+            )
             EditorTool.GRAVITY -> GravityZone(
                 id = id,
                 min = Vec2(p.x - half, p.y - half),
                 max = Vec2(p.x + half, p.y + half),
                 gravity = Vec2(0.0, -3.0).rotate(angle),
+                shape = shape,
             )
 
             EditorTool.DRAG -> DragRegion(
@@ -217,6 +233,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
                 max = Vec2(p.x + half, p.y + half),
                 linear = 0.6,
                 quadratic = 0.1,
+                shape = shape,
             )
 
             EditorTool.FORCE -> ForceZone(
@@ -224,6 +241,7 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
                 min = Vec2(p.x - half, p.y - half),
                 max = Vec2(p.x + half, p.y + half),
                 accel = Vec2(3.0, 0.0).rotate(angle),
+                shape = shape,
             )
 
             EditorTool.WALL -> {
@@ -478,9 +496,9 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
         val pointPadding = max(0.35, 18.0 / zoom)
         return sources.lastOrNull { source ->
             when (source) {
-                is PointCharge -> insideUniform(point, source.position, source.extent)
-                is MassSource -> (source.position - point).length <= pointPadding
-                is Magnet -> insideUniform(point, source.position, source.extent)
+                is PointCharge -> insideFrame(point, source.position, source.extent, source.extent, source.shape)
+                is MassSource -> insideFrame(point, source.position, source.extent, source.extent, source.shape)
+                is Magnet -> insideFrame(point, source.position, source.extent, source.extent, source.shape)
                 is GravityZone -> source.contains(point)
                 is ForceZone -> source.contains(point)
                 is DragRegion -> source.contains(point)
@@ -558,16 +576,47 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     // ---------------------------------------------------------------- frames
 
     fun sourceFrame(source: FieldSource): SourceFrame = when (source) {
-        is PointCharge -> SourceFrame(source.position, source.extent, source.extent)
-        is Magnet -> SourceFrame(source.position, source.extent, source.extent)
-        is MassSource -> SourceFrame(source.position, source.extent, source.extent)
-        is GravityZone -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
-        is ForceZone -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
-        is DragRegion -> SourceFrame((source.min + source.max) * 0.5, (source.max.x - source.min.x) * 0.5, (source.max.y - source.min.y) * 0.5)
+        is PointCharge -> SourceFrame(source.position, source.extent, source.extent, source.shape)
+        is Magnet -> SourceFrame(source.position, source.extent, source.extent, source.shape)
+        is MassSource -> SourceFrame(source.position, source.extent, source.extent, source.shape)
+        is GravityZone -> SourceFrame(
+            (source.min + source.max) * 0.5,
+            (source.max.x - source.min.x) * 0.5,
+            (source.max.y - source.min.y) * 0.5,
+            source.shape,
+        )
+        is ForceZone -> SourceFrame(
+            (source.min + source.max) * 0.5,
+            (source.max.x - source.min.x) * 0.5,
+            (source.max.y - source.min.y) * 0.5,
+            source.shape,
+        )
+        is DragRegion -> SourceFrame(
+            (source.min + source.max) * 0.5,
+            (source.max.x - source.min.x) * 0.5,
+            (source.max.y - source.min.y) * 0.5,
+            source.shape,
+        )
         is WallSegment -> {
             val length = (source.end - source.start).length
             SourceFrame((source.start + source.end) * 0.5, length * 0.5, max(source.thickness * 0.5, 0.5))
         }
+    }
+
+    /** Copies [source] with a new frame shape (ignored by walls). */
+    fun withShape(source: FieldSource, shape: FieldShape): FieldSource = when (source) {
+        is PointCharge -> source.copy(shape = shape)
+        is Magnet -> source.copy(shape = shape)
+        is MassSource -> source.copy(shape = shape)
+        is GravityZone -> source.copy(shape = shape)
+        is ForceZone -> source.copy(shape = shape)
+        is DragRegion -> source.copy(shape = shape)
+        is WallSegment -> source
+    }
+
+    fun setShapeOfSelected(shape: FieldShape) {
+        val current = selectedSource ?: return
+        updateSource(withShape(current, shape))
     }
 
     fun moveSourceTo(id: Long, center: Vec2) {
@@ -581,8 +630,14 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
     fun resizeSource(id: Long, halfWidth: Double, halfHeight: Double) {
         val source = sources.firstOrNull { it.id == id } ?: return
         val frame = sourceFrame(source)
-        val hw = halfWidth.coerceIn(0.5, 10.0)
-        val hh = halfHeight.coerceIn(0.5, 10.0)
+        val circle = frame.shape == FieldShape.CIRCLE
+        var hw = halfWidth.coerceIn(0.5, 10.0)
+        var hh = halfHeight.coerceIn(0.5, 10.0)
+        if (circle) {
+            val radius = max(hw, hh).coerceIn(0.5, 10.0)
+            hw = radius
+            hh = radius
+        }
         val updated = when (source) {
             is PointCharge -> source.copy(extent = max(hw, hh).coerceIn(0.5, 20.0))
             is Magnet -> source.copy(extent = max(hw, hh).coerceIn(0.5, 20.0))
@@ -882,8 +937,17 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
             else -> null
         }
 
-        fun insideUniform(point: Vec2, center: Vec2, extent: Double): Boolean =
-            abs(point.x - center.x) <= extent && abs(point.y - center.y) <= extent
+        fun insideFrame(point: Vec2, center: Vec2, halfWidth: Double, halfHeight: Double, shape: FieldShape): Boolean {
+            val dx = point.x - center.x
+            val dy = point.y - center.y
+            return when (shape) {
+                FieldShape.RECT -> abs(dx) <= halfWidth && abs(dy) <= halfHeight
+                FieldShape.CIRCLE -> {
+                    val radius = min(halfWidth, halfHeight)
+                    dx * dx + dy * dy <= radius * radius
+                }
+            }
+        }
 
         fun electricAngleDegrees(source: PointCharge): Int =
             Math.toDegrees(source.angle).let { ((it % 360 + 360) % 360).toInt() }
@@ -918,9 +982,6 @@ class EditorState(initial: Scene = Defaults.demoScene()) {
 
         fun magnetAngleDegrees(source: Magnet): Int =
             Math.toDegrees(source.angle).let { ((it % 360 + 360) % 360).toInt() }
-
-        fun magneticSign(source: Magnet): String =
-            if (source.strength >= 0.0) "⊙ 出屏" else "⊗ 入屏"
 
         fun gravityAngleDegrees(source: GravityZone): Int =
             Math.toDegrees(atan2(source.gravity.y, source.gravity.x))

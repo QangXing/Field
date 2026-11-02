@@ -70,6 +70,35 @@ class FieldMathTest {
     }
 
     @Test
+    fun circularElectricFrameClipsCorners() {
+        val model = FieldModel(
+            listOf(
+                PointCharge(1, Vec2.ZERO, 2.0, extent = 2.0, shape = FieldShape.CIRCLE),
+            ),
+        )
+        assertEquals(2.0, model.sample(Vec2(2.0, 0.0)).electric.x, 1e-12)
+        // Inside the square but outside the inscribed circle.
+        assertEquals(0.0, model.sample(Vec2(1.5, 1.5)).electric.length, 1e-12)
+    }
+
+    @Test
+    fun circularZoneUsesInscribedCircle() {
+        val model = FieldModel(
+            listOf(
+                GravityZone(
+                    id = 1,
+                    min = Vec2(-2.0, -2.0),
+                    max = Vec2(2.0, 2.0),
+                    gravity = Vec2(0.0, -3.0),
+                    shape = FieldShape.CIRCLE,
+                ),
+            ),
+        )
+        assertEquals(-3.0, model.sample(Vec2(1.0, 0.0)).gravity.y, 1e-12)
+        assertEquals(0.0, model.sample(Vec2(1.7, 1.7)).gravity.length, 1e-12)
+    }
+
+    @Test
     fun dragFieldVectorReturnsAmbientWind() {
         val model = FieldModel(
             listOf(

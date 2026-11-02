@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -61,6 +62,7 @@ import dev.field.app.ui.theme.TextSecondary
 import dev.field.core.fields.DragRegion
 import dev.field.core.fields.FieldKind
 import dev.field.core.fields.FieldModel
+import dev.field.core.fields.FieldShape
 import dev.field.core.fields.FieldSource
 import dev.field.core.fields.ForceZone
 import dev.field.core.fields.GravityZone
@@ -167,51 +169,58 @@ fun FieldCanvas(state: EditorState, modifier: Modifier = Modifier) {
                     val selected = state.selectedSource
                     val frame = selected?.let { state.sourceFrame(it) }
                     val frameCenter = frame?.let { screenOf(it.center) }
+                    val circleRadiusPx = frame?.let { it.circleRadius.toFloat() * state.zoom.toFloat() }
                     val cornerPoint = frame?.let {
-                        Vec2(it.center.x + it.halfWidth, it.center.y + it.halfHeight)
+                        if (it.shape == FieldShape.CIRCLE) {
+                            val r = it.circleRadius * 0.7071
+                            Vec2(it.center.x + r, it.center.y + r)
+                        } else {
+                            Vec2(it.center.x + it.halfWidth, it.center.y + it.halfHeight)
+                        }
                     }
                     val frameCorner = cornerPoint?.let { screenOf(it) }
                     val nearCenter = frameCenter != null &&
                         (downPosition - frameCenter).getDistance() <= handleRadius
                     val nearCorner = frameCorner != null &&
                         (downPosition - frameCorner).getDistance() <= handleRadius
-                    val nearEdge = if (frame != null) {
-                        val topLeft = screenOf(Vec2(frame.center.x - frame.halfWidth, frame.center.y + frame.halfHeight))
-                        val right = screenOf(Vec2(frame.center.x + frame.halfWidth, frame.center.y))
-                        val bottom = screenOf(Vec2(frame.center.x, frame.center.y - frame.halfHeight))
+                    val nearEdge = if (frame != null && frameCenter != null) {
                         val edgeTolerance = handleRadius * 0.8f
-                        val withinX = downPosition.x >= topLeft.x - edgeTolerance &&
-                            downPosition.x <= right.x + edgeTolerance
-                        val withinY = downPosition.y >= topLeft.y - edgeTolerance &&
-                            downPosition.y <= bottom.y + edgeTolerance
-                        (withinX && (abs(downPosition.y - topLeft.y) <= edgeTolerance ||
-                            abs(downPosition.y - bottom.y) <= edgeTolerance)) ||
-                            (withinY && (abs(downPosition.x - topLeft.x) <= edgeTolerance ||
-                                abs(downPosition.x - right.x) <= edgeTolerance))
+                        if (frame.shape == FieldShape.CIRCLE && circleRadiusPx != null) {
+                            kotlin.math.abs(
+                                (downPosition - frameCenter).getDistance() - circleRadiusPx,
+                            ) <= edgeTolerance
+                        } else {
+                            val topLeft = screenOf(Vec2(frame.center.x - frame.halfWidth, frame.center.y + frame.halfHeight))
+                            val right = screenOf(Vec2(frame.center.x + frame.halfWidth, frame.center.y))
+                            val bottom = screenOf(Vec2(frame.center.x, frame.center.y - frame.halfHeight))
+                            val withinX = downPosition.x >= topLeft.x - edgeTolerance &&
+                                downPosition.x <= right.x + edgeTolerance
+                            val withinY = downPosition.y >= topLeft.y - edgeTolerance &&
+                                downPosition.y <= bottom.y + edgeTolerance
+                            (withinX && (abs(downPosition.y - topLeft.y) <= edgeTolerance ||
+                                abs(downPosition.y - bottom.y) <= edgeTolerance)) ||
+                                (withinY && (abs(downPosition.x - topLeft.x) <= edgeTolerance ||
+                                    abs(downPosition.x - right.x) <= edgeTolerance))
+                        }
                     } else {
                         false
                     }
-                    val bodyHit = state.hitTestBody(downWorld)
-                    val sourceHit = state.hitTest(downWorld)
+                    val bodyCenter = state.selectedBody?.let { screenOf(it.position) }
+                    val nearBodyHandle = bodyCenter != null &&
+                        (downPosition - bodyCenter).getDistance() <= handleRadius
 
                     var mode = when {
                         state.tool?.isEraser == true -> DragMode.ERASE
-                        state.tool == null && nearCorner -> DragMode.RESIZE_SOURCE
-                        state.tool == null && nearEdge -> DragMode.RESIZE_SOURCE
                         state.tool == null && nearCenter -> DragMode.MOVE_SOURCE
-
-                        state.tool == null && bodyHit != null -> DragMode.MOVE_BODY
-                        state.tool == null && sourceHit != null -> DragMode.MOVE_SOURCE
+                        state.tool == null && (nearCorner || nearEdge) -> DragMode.RESIZE_SOURCE
+                        state.tool == null && nearBodyHandle -> DragMode.MOVE_BODY
                         state.tool == null -> DragMode.PAN
                         else -> DragMode.PLACE
                     }
 
                     when (mode) {
-                        DragMode.MOVE_BODY -> bodyHit?.let { state.selectBody(it.id) }
-                        DragMode.MOVE_SOURCE -> {
-                            if (sourceHit != null) state.select(sourceHit.id)
-                        }
-
+                        DragMode.MOVE_BODY -> Unit
+                        DragMode.MOVE_SOURCE -> selected?.let { state.select(it.id) }
                         else -> Unit
                     }
 
@@ -273,10 +282,19 @@ fun FieldCanvas(state: EditorState, modifier: Modifier = Modifier) {
                                                     undoPushed = true
                                                 }
                                                 val current = state.sources.firstOrNull { it.id == id }
-                                                val center = current?.let { state.sourceFrame(it) }?.center ?: currentWorld
-                                                val hw = max(abs(state.snap(currentWorld.x) - center.x), 0.5)
-                                                val hh = max(abs(state.snap(currentWorld.y) - center.y), 0.5)
-                                                state.resizeSource(id, hw, hh)
+                                                val currentFrame = current?.let { state.sourceFrame(it) }
+                                                val center = currentFrame?.center ?: currentWorld
+                                                if (frame?.shape == FieldShape.CIRCLE) {
+                                                    val radius = max(
+                                                        state.snap((currentWorld - center).length),
+                                                        0.5,
+                                                    )
+                                                    state.resizeSource(id, radius, radius)
+                                                } else {
+                                                    val hw = max(abs(state.snap(currentWorld.x) - center.x), 0.5)
+                                                    val hh = max(abs(state.snap(currentWorld.y) - center.y), 0.5)
+                                                    state.resizeSource(id, hw, hh)
+                                                }
                                             }
                                         }
 
@@ -535,22 +553,62 @@ private fun DrawScope.drawZone(
         is DragRegion -> Triple(source.min, source.max, FieldDrag)
         else -> return
     }
-    val topLeft = Offset(sx(min.x), sy(max.y))
-    val size = Size((max.x - min.x).toFloat() * zoom, (max.y - min.y).toFloat() * zoom)
-    drawRect(color.copy(alpha = 0.10f), topLeft, size)
-    drawRect(color.copy(alpha = 0.55f), topLeft, size, style = Stroke(width = 1.5f))
+    val circle = when (source) {
+        is GravityZone -> source.shape == FieldShape.CIRCLE
+        is ForceZone -> source.shape == FieldShape.CIRCLE
+        is DragRegion -> source.shape == FieldShape.CIRCLE
+        else -> false
+    }
+    val center = Vec2((min.x + max.x) * 0.5, (min.y + max.y) * 0.5)
+    val radius = min((max.x - min.x) * 0.5, (max.y - min.y) * 0.5)
 
-    if (source is DragRegion) {
-        clipRect(topLeft.x, topLeft.y, topLeft.x + size.width, topLeft.y + size.height) {
-            var offset = -size.height
-            while (offset < size.width) {
-                drawLine(
-                    color = color.copy(alpha = 0.18f),
-                    start = Offset(topLeft.x + offset, topLeft.y + size.height),
-                    end = Offset(topLeft.x + offset + size.height, topLeft.y),
-                    strokeWidth = 1f,
+    if (circle) {
+        val centerOffset = Offset(sx(center.x), sy(center.y))
+        val px = radius.toFloat() * zoom
+        drawCircle(color.copy(alpha = 0.10f), px, centerOffset)
+        drawCircle(color.copy(alpha = 0.55f), px, centerOffset, style = Stroke(1.5f))
+        if (source is DragRegion) {
+            val clip = Path().apply {
+                addOval(
+                    androidx.compose.ui.geometry.Rect(
+                        centerOffset.x - px,
+                        centerOffset.y - px,
+                        centerOffset.x + px,
+                        centerOffset.y + px,
+                    ),
                 )
-                offset += 8f
+            }
+            clipPath(clip) {
+                var offset = -px * 2f
+                while (offset < px * 2f) {
+                    drawLine(
+                        color = color.copy(alpha = 0.18f),
+                        start = Offset(centerOffset.x + offset, centerOffset.y + px),
+                        end = Offset(centerOffset.x + offset + px * 2f, centerOffset.y - px),
+                        strokeWidth = 1f,
+                    )
+                    offset += 8f
+                }
+            }
+        }
+    } else {
+        val topLeft = Offset(sx(min.x), sy(max.y))
+        val size = Size((max.x - min.x).toFloat() * zoom, (max.y - min.y).toFloat() * zoom)
+        drawRect(color.copy(alpha = 0.10f), topLeft, size)
+        drawRect(color.copy(alpha = 0.55f), topLeft, size, style = Stroke(width = 1.5f))
+
+        if (source is DragRegion) {
+            clipRect(topLeft.x, topLeft.y, topLeft.x + size.width, topLeft.y + size.height) {
+                var offset = -size.height
+                while (offset < size.width) {
+                    drawLine(
+                        color = color.copy(alpha = 0.18f),
+                        start = Offset(topLeft.x + offset, topLeft.y + size.height),
+                        end = Offset(topLeft.x + offset + size.height, topLeft.y),
+                        strokeWidth = 1f,
+                    )
+                    offset += 8f
+                }
             }
         }
     }
@@ -583,19 +641,8 @@ private fun DrawScope.drawSource(
         is PointCharge -> {
             val center = Offset(sx(source.position.x), sy(source.position.y))
             val color = if (source.charge >= 0.0) FieldElectric else Danger
-            drawUniformRegion(source.position, source.extent, color, sx, sy, zoom)
+            drawUniformRegion(source.position, source.extent, source.shape, color, sx, sy, zoom)
             drawElectricFieldIcon(source, color, textMeasurer, sx, sy, zoom)
-            if (selected) {
-                drawRect(
-                    Accent.copy(alpha = 0.9f),
-                    Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent)),
-                    Size(
-                        (source.extent * 2.0).toFloat() * zoom,
-                        (source.extent * 2.0).toFloat() * zoom,
-                    ),
-                    style = Stroke(2f),
-                )
-            }
             drawText(
                 textMeasurer,
                 "E ${"%.1f".format(kotlin.math.abs(source.charge))}",
@@ -620,19 +667,8 @@ private fun DrawScope.drawSource(
 
         is Magnet -> {
             val center = Offset(sx(source.position.x), sy(source.position.y))
-            drawUniformRegion(source.position, source.extent, FieldMagnetic, sx, sy, zoom)
+            drawUniformRegion(source.position, source.extent, source.shape, FieldMagnetic, sx, sy, zoom)
             drawMagneticFieldSymbols(source, sx, sy, zoom, FieldMagnetic)
-            if (selected) {
-                drawRect(
-                    Accent.copy(alpha = 0.9f),
-                    Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent)),
-                    Size(
-                        (source.extent * 2.0).toFloat() * zoom,
-                        (source.extent * 2.0).toFloat() * zoom,
-                    ),
-                    style = Stroke(2f),
-                )
-            }
             drawText(
                 textMeasurer,
                 "Bz ${"%.1f".format(source.strength)}",
@@ -646,19 +682,27 @@ private fun DrawScope.drawSource(
     }
 }
 
-/** Low-alpha fill and border for a square uniform-field region. */
+/** Low-alpha fill and border for a uniform-field region. */
 private fun DrawScope.drawUniformRegion(
     position: Vec2,
     extent: Double,
+    shape: FieldShape,
     color: Color,
     sx: (Double) -> Float,
     sy: (Double) -> Float,
     zoom: Float,
 ) {
-    val topLeft = Offset(sx(position.x - extent), sy(position.y + extent))
-    val size = Size((extent * 2.0).toFloat() * zoom, (extent * 2.0).toFloat() * zoom)
-    drawRect(color.copy(alpha = 0.10f), topLeft, size)
-    drawRect(color.copy(alpha = 0.55f), topLeft, size, style = Stroke(1.5f))
+    if (shape == FieldShape.CIRCLE) {
+        val center = Offset(sx(position.x), sy(position.y))
+        val radius = extent.toFloat() * zoom
+        drawCircle(color.copy(alpha = 0.10f), radius, center)
+        drawCircle(color.copy(alpha = 0.55f), radius, center, style = Stroke(1.5f))
+    } else {
+        val topLeft = Offset(sx(position.x - extent), sy(position.y + extent))
+        val size = Size((extent * 2.0).toFloat() * zoom, (extent * 2.0).toFloat() * zoom)
+        drawRect(color.copy(alpha = 0.10f), topLeft, size)
+        drawRect(color.copy(alpha = 0.55f), topLeft, size, style = Stroke(1.5f))
+    }
 }
 
 /** Centre arrow showing the uniform E direction (flips with the sign of the strength). */
@@ -712,12 +756,17 @@ private fun DrawScope.drawMagneticFieldSymbols(
 ) {
     val extent = source.extent
     if (extent <= 0.0) return
+    val circle = source.shape == FieldShape.CIRCLE
     val step = 2.0
     val radius = min(10f, max(4f, 0.2f * zoom))
     var gx = -extent + 1.0
     while (gx <= extent - 0.5) {
         var gy = -extent + 1.0
         while (gy <= extent - 0.5) {
+            if (circle && gx * gx + gy * gy > extent * extent) {
+                gy += step
+                continue
+            }
             val center = Offset(sx(source.position.x + gx), sy(source.position.y + gy))
             drawCircle(color.copy(alpha = 0.8f), radius, center, style = Stroke(1.4f))
             if (source.strength >= 0.0) {
@@ -800,28 +849,46 @@ private fun DrawScope.drawFrame(
     density: Float,
 ) {
     val frame = state.sourceFrame(source)
-    val topLeft = Offset(sx(frame.center.x - frame.halfWidth), sy(frame.center.y + frame.halfHeight))
-    val size = Size(frame.width.toFloat() * zoom, frame.height.toFloat() * zoom)
-    drawRect(
-        color = Accent.copy(alpha = 0.9f),
-        topLeft = topLeft,
-        size = size,
-        style = Stroke(
-            width = 1.5f * density,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f * density, 6f * density)),
-        ),
+    val centerOffset = Offset(sx(frame.center.x), sy(frame.center.y))
+    val dashed = Stroke(
+        width = 1.5f * density,
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f * density, 6f * density)),
     )
-    drawCircle(Accent.copy(alpha = 0.15f), 12f * density, Offset(sx(frame.center.x), sy(frame.center.y)))
-    drawCircle(Accent, 5f * density, Offset(sx(frame.center.x), sy(frame.center.y)))
-    drawCircle(Bg, 2f * density, Offset(sx(frame.center.x), sy(frame.center.y)))
 
-    val corner = Offset(topLeft.x + size.width, topLeft.y)
-    val handles = listOf(
-        corner,
-        Offset(topLeft.x, topLeft.y),
-        Offset(topLeft.x, topLeft.y + size.height),
-        Offset(topLeft.x + size.width, topLeft.y + size.height),
-    )
+    val handles: List<Offset>
+    val label: String
+    if (frame.shape == FieldShape.CIRCLE) {
+        val radius = frame.circleRadius.toFloat() * zoom
+        drawCircle(Accent.copy(alpha = 0.9f), radius, centerOffset, style = dashed)
+        handles = listOf(
+            Offset(centerOffset.x + radius, centerOffset.y),
+            Offset(centerOffset.x - radius, centerOffset.y),
+            Offset(centerOffset.x, centerOffset.y + radius),
+            Offset(centerOffset.x, centerOffset.y - radius),
+        )
+        label = "直径 %.1f m".format(frame.circleRadius * 2.0)
+    } else {
+        val topLeft = Offset(sx(frame.center.x - frame.halfWidth), sy(frame.center.y + frame.halfHeight))
+        val size = Size(frame.width.toFloat() * zoom, frame.height.toFloat() * zoom)
+        drawRect(
+            color = Accent.copy(alpha = 0.9f),
+            topLeft = topLeft,
+            size = size,
+            style = dashed,
+        )
+        handles = listOf(
+            Offset(topLeft.x + size.width, topLeft.y),
+            Offset(topLeft.x, topLeft.y),
+            Offset(topLeft.x, topLeft.y + size.height),
+            Offset(topLeft.x + size.width, topLeft.y + size.height),
+        )
+        label = "%.1f × %.1f m".format(frame.width, frame.height)
+    }
+
+    drawCircle(Accent.copy(alpha = 0.15f), 12f * density, centerOffset)
+    drawCircle(Accent, 5f * density, centerOffset)
+    drawCircle(Bg, 2f * density, centerOffset)
+
     for (handle in handles) {
         val handleSize = 12f * density
         drawRect(
@@ -837,11 +904,15 @@ private fun DrawScope.drawFrame(
         )
     }
 
-    val label = "%.1f × %.1f m".format(frame.width, frame.height)
+    val labelTop = if (frame.shape == FieldShape.CIRCLE) {
+        centerOffset.y - frame.circleRadius.toFloat() * zoom - 16f * density
+    } else {
+        sy(frame.center.y + frame.halfHeight) - 16f * density
+    }
     drawText(
         textMeasurer,
         label,
-        topLeft = Offset(topLeft.x, max(0f, topLeft.y - 16f * density)),
+        topLeft = Offset(centerOffset.x - 28f * density, max(0f, labelTop)),
         style = TextStyle(color = Accent, fontSize = 9.sp),
     )
 }
@@ -937,6 +1008,9 @@ private fun DrawScope.drawBodies(
 
         if (body.id == state.selectedBodyId) {
             drawCircle(Accent, radius + 5f * density, center, style = Stroke(2f * density))
+            drawCircle(Accent.copy(alpha = 0.18f), 10f * density, center)
+            drawCircle(Accent, 4f * density, center)
+            drawCircle(Bg, 1.8f * density, center)
         }
 
         if (state.rules.forceTorqueDisplay) {
@@ -1120,24 +1194,36 @@ private fun DrawScope.drawGhost(
     val source = ghost.source ?: return
     when (source) {
         is PointCharge -> {
-            val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
-            val extentSize = Size(
-                (source.extent * 2.0).toFloat() * zoom,
-                (source.extent * 2.0).toFloat() * zoom,
-            )
-            drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
-            drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            if (source.shape == FieldShape.CIRCLE) {
+                val c = Offset(sx(source.position.x), sy(source.position.y))
+                drawCircle(color.copy(alpha = 0.14f), source.extent.toFloat() * zoom, c)
+                drawCircle(color, source.extent.toFloat() * zoom, c, style = Stroke(2f))
+            } else {
+                val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
+                val extentSize = Size(
+                    (source.extent * 2.0).toFloat() * zoom,
+                    (source.extent * 2.0).toFloat() * zoom,
+                )
+                drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
+                drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            }
             drawElectricFieldIcon(source, color, textMeasurer, sx, sy, zoom)
         }
 
         is Magnet -> {
-            val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
-            val extentSize = Size(
-                (source.extent * 2.0).toFloat() * zoom,
-                (source.extent * 2.0).toFloat() * zoom,
-            )
-            drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
-            drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            if (source.shape == FieldShape.CIRCLE) {
+                val c = Offset(sx(source.position.x), sy(source.position.y))
+                drawCircle(color.copy(alpha = 0.14f), source.extent.toFloat() * zoom, c)
+                drawCircle(color, source.extent.toFloat() * zoom, c, style = Stroke(2f))
+            } else {
+                val topLeft = Offset(sx(source.position.x - source.extent), sy(source.position.y + source.extent))
+                val extentSize = Size(
+                    (source.extent * 2.0).toFloat() * zoom,
+                    (source.extent * 2.0).toFloat() * zoom,
+                )
+                drawRect(color.copy(alpha = 0.14f), topLeft, extentSize)
+                drawRect(color, topLeft, extentSize, style = Stroke(2f))
+            }
             drawMagneticFieldSymbols(source, sx, sy, zoom, color)
         }
 
@@ -1165,16 +1251,24 @@ private fun DrawScope.drawGhost(
         }
 
         else -> {
-            val (min, max) = when (source) {
-                is GravityZone -> source.min to source.max
-                is ForceZone -> source.min to source.max
-                is DragRegion -> source.min to source.max
+            val (min, max, shape) = when (source) {
+                is GravityZone -> Triple(source.min, source.max, source.shape)
+                is ForceZone -> Triple(source.min, source.max, source.shape)
+                is DragRegion -> Triple(source.min, source.max, source.shape)
                 else -> return
             }
-            val topLeft = Offset(sx(min.x), sy(max.y))
-            val zoneSize = Size((max.x - min.x).toFloat() * zoom, (max.y - min.y).toFloat() * zoom)
-            drawRect(color.copy(alpha = 0.14f), topLeft, zoneSize)
-            drawRect(color, topLeft, zoneSize, style = Stroke(2f))
+            val center = Vec2((min.x + max.x) * 0.5, (min.y + max.y) * 0.5)
+            if (shape == FieldShape.CIRCLE) {
+                val radius = min((max.x - min.x) * 0.5, (max.y - min.y) * 0.5).toFloat() * zoom
+                val c = Offset(sx(center.x), sy(center.y))
+                drawCircle(color.copy(alpha = 0.14f), radius, c)
+                drawCircle(color, radius, c, style = Stroke(2f))
+            } else {
+                val topLeft = Offset(sx(min.x), sy(max.y))
+                val zoneSize = Size((max.x - min.x).toFloat() * zoom, (max.y - min.y).toFloat() * zoom)
+                drawRect(color.copy(alpha = 0.14f), topLeft, zoneSize)
+                drawRect(color, topLeft, zoneSize, style = Stroke(2f))
+            }
         }
     }
 }

@@ -3,9 +3,21 @@ package dev.field.core.fields
 import dev.field.core.math.Vec2
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+
+/** Frame shape of a field source. */
+@Serializable
+enum class FieldShape {
+    @SerialName("rect")
+    RECT,
+
+    @SerialName("circle")
+    CIRCLE,
+}
 
 /**
  * A single field source. Sources accumulate their contribution into [out] in place.
@@ -26,10 +38,23 @@ sealed class FieldSource {
         return dx * dx + dy * dy + eps2
     }
 
-    /** Square field frame: point sources only contribute inside ±[extent]. */
-    protected fun insideExtent(p: Vec2, center: Vec2, extent: Double): Boolean {
-        if (extent <= 0.0) return true
-        return kotlin.math.abs(p.x - center.x) <= extent && kotlin.math.abs(p.y - center.y) <= extent
+    /** True when [p] lies inside the frame centred at [center] with the given half extents. */
+    protected fun insideFrame(
+        p: Vec2,
+        center: Vec2,
+        halfWidth: Double,
+        halfHeight: Double,
+        shape: FieldShape,
+    ): Boolean {
+        val dx = p.x - center.x
+        val dy = p.y - center.y
+        return when (shape) {
+            FieldShape.RECT -> abs(dx) <= halfWidth && abs(dy) <= halfHeight
+            FieldShape.CIRCLE -> {
+                val radius = min(halfWidth, halfHeight)
+                dx * dx + dy * dy <= radius * radius
+            }
+        }
     }
 
     companion object {
@@ -39,7 +64,7 @@ sealed class FieldSource {
 }
 
 /**
- * Uniform electric field over a square region.
+ * Uniform electric field over a square or circular region.
  *
  * The legacy name is kept so existing JSON v2/v3 saves remain readable.
  * Inside the frame [out] receives `|charge|` in the direction [angle]; outside it is zero.
@@ -52,13 +77,14 @@ data class PointCharge(
     val position: Vec2,
     /** Signed field strength along [angle]. */
     val charge: Double,
-    /** Half side of the square field frame in metres. */
+    /** Half side (rect) or radius (circle) of the frame in metres. */
     val extent: Double = DEFAULT_EXTENT,
     /** Direction of the field in radians. */
     val angle: Double = 0.0,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
-        if (!insideExtent(p, position, extent)) return
+        if (!insideFrame(p, position, extent, extent, shape)) return
         val ex = cos(angle) * charge
         val ey = sin(angle) * charge
         out.electric = Vec2(out.electric.x + ex, out.electric.y + ey)
@@ -68,7 +94,7 @@ data class PointCharge(
 }
 
 /**
- * Uniform out-of-plane magnetic field `Bz` over a square region.
+ * Uniform out-of-plane magnetic field `Bz` over a square or circular region.
  *
  * The legacy name (and the stored [angle] field) are kept for JSON compatibility;
  * a uniform perpendicular field has no in-plane orientation, so [angle] is ignored.
@@ -81,10 +107,12 @@ data class Magnet(
     /** Signed out-of-plane magnetic flux density. */
     val strength: Double,
     val angle: Double = 0.0,
+    /** Half side (rect) or radius (circle) of the frame in metres. */
     val extent: Double = DEFAULT_EXTENT,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
-        if (!insideExtent(p, position, extent)) return
+        if (!insideFrame(p, position, extent, extent, shape)) return
         out.magneticBz += strength
     }
 }
@@ -96,11 +124,12 @@ data class MassSource(
     val position: Vec2,
     val mass: Double,
     val extent: Double = DEFAULT_EXTENT,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     internal var gravityConstant: Double = 1.0
 
     override fun accumulate(p: Vec2, out: FieldSample) {
-        if (!insideExtent(p, position, extent)) return
+        if (!insideFrame(p, position, extent, extent, shape)) return
         val dx = p.x - position.x
         val dy = p.y - position.y
         val denom = softenedDistanceSquared(dx, dy)
@@ -118,6 +147,7 @@ data class GravityZone(
     val min: Vec2,
     val max: Vec2,
     val gravity: Vec2,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
         if (contains(p)) {
@@ -125,8 +155,13 @@ data class GravityZone(
         }
     }
 
-    fun contains(p: Vec2): Boolean =
-        p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y
+    fun contains(p: Vec2): Boolean = insideFrame(
+        p,
+        Vec2((min.x + max.x) * 0.5, (min.y + max.y) * 0.5),
+        (max.x - min.x) * 0.5,
+        (max.y - min.y) * 0.5,
+        shape,
+    )
 }
 
 @Serializable
@@ -136,6 +171,7 @@ data class ForceZone(
     val min: Vec2,
     val max: Vec2,
     val accel: Vec2,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
         if (contains(p)) {
@@ -143,8 +179,13 @@ data class ForceZone(
         }
     }
 
-    fun contains(p: Vec2): Boolean =
-        p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y
+    fun contains(p: Vec2): Boolean = insideFrame(
+        p,
+        Vec2((min.x + max.x) * 0.5, (min.y + max.y) * 0.5),
+        (max.x - min.x) * 0.5,
+        (max.y - min.y) * 0.5,
+        shape,
+    )
 }
 
 @Serializable
@@ -156,6 +197,7 @@ data class DragRegion(
     val linear: Double = 0.6,
     val quadratic: Double = 0.1,
     val wind: Vec2 = Vec2.ZERO,
+    val shape: FieldShape = FieldShape.RECT,
 ) : FieldSource() {
     override fun accumulate(p: Vec2, out: FieldSample) {
         if (contains(p)) {
@@ -165,8 +207,13 @@ data class DragRegion(
         }
     }
 
-    fun contains(p: Vec2): Boolean =
-        p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y
+    fun contains(p: Vec2): Boolean = insideFrame(
+        p,
+        Vec2((min.x + max.x) * 0.5, (min.y + max.y) * 0.5),
+        (max.x - min.x) * 0.5,
+        (max.y - min.y) * 0.5,
+        shape,
+    )
 }
 
 @Serializable

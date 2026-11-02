@@ -378,7 +378,7 @@ private fun TopHud(
     LabPanel(Modifier.fillMaxWidth(), accent = true) {
         Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MiniButton("≡", onExit, width = 34)
+                MiniButton("=", onExit, width = 34)
                 Column(Modifier.weight(1f)) {
                     Text(
                         state.sceneName,
@@ -408,15 +408,15 @@ private fun TopHud(
                 MiniButton("+", { state.speedUp() })
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                MiniButton("↶", { state.undo() }, enabled = state.canUndo)
-                MiniButton("↷", { state.redo() }, enabled = state.canRedo)
-                MiniButton("⌫", { state.clearProbes() }, enabled = probeCount > 0)
+                MiniButton("撤", { state.undo() }, enabled = state.canUndo)
+                MiniButton("重", { state.redo() }, enabled = state.canRedo)
+                MiniButton("清", { state.clearProbes() }, enabled = probeCount > 0)
                 Spacer(Modifier.weight(1f))
                 Text("FPS $fps", color = TextSecondary, fontSize = 9.sp)
                 saveIndicator?.let {
                     Text(it, color = Accent, fontSize = 9.sp)
                 }
-                MiniButton("＋", onOpenLaunch)
+                MiniButton("+", onOpenLaunch)
                 MiniButton("存", onSave)
                 MiniButton("档", onOpenSavePanel)
                 MiniButton("设", onOpenSettings, selected = false)
@@ -518,7 +518,7 @@ private fun ContextBar(state: EditorState) {
                 Text("选择模式", color = TextSecondary, fontSize = 10.sp)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "拖动中心移动 · 拖动边框缩放",
+                    "点按选中 · 拖中心移动 · 拖边框缩放",
                     color = TextSecondary.copy(alpha = 0.8f),
                     fontSize = 9.sp,
                 )
@@ -546,16 +546,24 @@ private fun ContextBar(state: EditorState) {
 
                 tool == EditorTool.ELECTRIC -> {
                     Text("极性", color = TextSecondary, fontSize = 10.sp)
-                    Chip("＋", state.chargeSign >= 0.0, Modifier.clickable { state.chargeSign = 1.0 })
-                    Chip("－", state.chargeSign < 0.0, Modifier.clickable { state.chargeSign = -1.0 })
+                    Chip("+", state.chargeSign >= 0.0, Modifier.clickable { state.chargeSign = 1.0 })
+                    Chip("-", state.chargeSign < 0.0, Modifier.clickable { state.chargeSign = -1.0 })
                 }
 
                 else -> Text("放置 ${tool.label}：点击落位 · 拖动连放", color = TextSecondary, fontSize = 10.sp)
             }
             Spacer(Modifier.weight(1f))
+            if (!tool.isEraser && !tool.isBody && tool != EditorTool.WALL) {
+                Chip("方", state.placementShape == dev.field.core.fields.FieldShape.RECT, Modifier.clickable {
+                    state.placementShape = dev.field.core.fields.FieldShape.RECT
+                })
+                Chip("圆", state.placementShape == dev.field.core.fields.FieldShape.CIRCLE, Modifier.clickable {
+                    state.placementShape = dev.field.core.fields.FieldShape.CIRCLE
+                })
+            }
             if (tool.rotatable) {
                 Chip("${state.rotationDeg}°", true, Modifier.clickable { state.resetRotation() })
-                MiniButton("↻", { state.rotate() }, width = 30)
+                MiniButton("旋", { state.rotate() }, width = 30)
             }
         }
     }
@@ -582,6 +590,21 @@ private fun SourceInspector(
         }
         Column(Modifier.verticalScroll(rememberScrollState())) {
             SectionLabel("场设置（拖动中心移动，拖动边框缩放）")
+            if (source !is WallSegment) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("形状", color = TextSecondary, fontSize = 10.sp)
+                    Chip("方形", frame.shape == dev.field.core.fields.FieldShape.RECT, Modifier.clickable {
+                        state.setShapeOfSelected(dev.field.core.fields.FieldShape.RECT)
+                    })
+                    Chip("圆形", frame.shape == dev.field.core.fields.FieldShape.CIRCLE, Modifier.clickable {
+                        state.setShapeOfSelected(dev.field.core.fields.FieldShape.CIRCLE)
+                    })
+                }
+            }
             LabSlider(
                 "中心 X",
                 frame.center.x,
@@ -601,7 +624,18 @@ private fun SourceInspector(
                 valueText = "${EditorState.format(frame.center.y)} m",
             )
             if (source !is WallSegment) {
-                if (frame.halfWidth == frame.halfHeight) {
+                if (frame.shape == dev.field.core.fields.FieldShape.CIRCLE) {
+                    val maxRadius = if (source is PointCharge || source is Magnet || source is MassSource) 20.0 else 10.0
+                    LabSlider(
+                        "半径",
+                        frame.circleRadius,
+                        0.5..maxRadius,
+                        onValueChange = { value ->
+                            state.resizeSource(source.id, value, value)
+                        },
+                        valueText = "${EditorState.format(frame.circleRadius)} m",
+                    )
+                } else if (frame.halfWidth == frame.halfHeight) {
                     LabSlider(
                         "边框大小",
                         frame.width,
@@ -679,7 +713,7 @@ private fun SourceInspector(
                 is Magnet -> {
                     SectionLabel("匀强磁场参数")
                     Text(
-                        "边框内 Bz 恒定。正值 ⊙ 穿出屏幕，负值 ⊗ 穿入屏幕。",
+                        "边框内 Bz 恒定。正值穿出屏幕，负值穿入屏幕。",
                         color = TextSecondary,
                         fontSize = 9.sp,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
@@ -700,7 +734,7 @@ private fun SourceInspector(
                         LabButton("反向", {
                             state.updateSelected { (it as Magnet).copy(strength = -it.strength) }
                         }, modifier = Modifier.weight(1f))
-                        LabButton("⊙ +1.5", {
+                        LabButton("Bz +1.5", {
                             state.updateSelected { (it as Magnet).copy(strength = 1.5) }
                         }, modifier = Modifier.weight(1f))
                     }

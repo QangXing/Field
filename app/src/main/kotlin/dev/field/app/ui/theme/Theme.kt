@@ -5,7 +5,10 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import dev.field.app.R
 
 val Bg = Color(0xFF171A1E)
 val Surface = Color(0xFF262B31)
@@ -26,6 +29,19 @@ val FieldGravity = Color(0xFFFFD37F)
 val FieldDrag = Color(0xFF7EE787)
 val FieldForce = Color(0xFFC792EA)
 
+/** Decorative display face used for the FIELD LAB wordmark (Latin only). */
+val DisplayFont = FontFamily(
+    Font(R.font.field_display, FontWeight.Normal),
+    Font(R.font.field_display, FontWeight.Bold),
+)
+
+/** Monospace CJK face used across the sandbox UI. */
+val UiFont = FontFamily(
+    Font(R.font.maple_mono_cn_extra_bold, FontWeight.Normal),
+    Font(R.font.maple_mono_cn_extra_bold, FontWeight.Bold),
+    Font(R.font.maple_mono_cn_extra_bold, FontWeight.ExtraBold),
+)
+
 private val scheme = darkColorScheme(
     primary = Accent,
     onPrimary = Bg,
@@ -39,15 +55,15 @@ private val scheme = darkColorScheme(
 
 private val LabTypography = Typography().let { base ->
     Typography(
-        bodyLarge = base.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-        bodyMedium = base.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-        bodySmall = base.bodySmall.copy(fontFamily = FontFamily.Monospace),
-        titleLarge = base.titleLarge.copy(fontFamily = FontFamily.Monospace),
-        titleMedium = base.titleMedium.copy(fontFamily = FontFamily.Monospace),
-        titleSmall = base.titleSmall.copy(fontFamily = FontFamily.Monospace),
-        labelLarge = base.labelLarge.copy(fontFamily = FontFamily.Monospace),
-        labelMedium = base.labelMedium.copy(fontFamily = FontFamily.Monospace),
-        labelSmall = base.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        bodyLarge = base.bodyLarge.copy(fontFamily = UiFont),
+        bodyMedium = base.bodyMedium.copy(fontFamily = UiFont),
+        bodySmall = base.bodySmall.copy(fontFamily = UiFont),
+        titleLarge = base.titleLarge.copy(fontFamily = UiFont),
+        titleMedium = base.titleMedium.copy(fontFamily = UiFont),
+        titleSmall = base.titleSmall.copy(fontFamily = UiFont),
+        labelLarge = base.labelLarge.copy(fontFamily = UiFont),
+        labelMedium = base.labelMedium.copy(fontFamily = UiFont),
+        labelSmall = base.labelSmall.copy(fontFamily = UiFont),
     )
 }
 

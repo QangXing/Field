@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -257,12 +258,18 @@ fun DividerLine(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun TitleText(text: String, modifier: Modifier = Modifier, color: Color = TextPrimary) {
+fun TitleText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = TextPrimary,
+    fontFamily: FontFamily? = null,
+) {
     Text(
         text = text,
         color = color,
         fontSize = 18.sp,
         fontWeight = FontWeight.Bold,
+        fontFamily = fontFamily,
         letterSpacing = 2.sp,
         modifier = modifier,
     )
